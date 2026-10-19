@@ -2,14 +2,11 @@
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import {
-    saveSettingsDebounced,
-    eventSource,
-    event_types,
-    setExtensionPrompt,
-    extension_prompt_types,
-    extension_prompt_roles,
-} from '../../../../script.js';
+
+// Everything else comes from getContext() so a renamed export in a newer SillyTavern cannot break loading.
+let _sd = null;
+import('../../../../script.js').then((m) => { _sd = m.saveSettingsDebounced; }).catch(() => {});
+const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || _sd)?.(); };
 
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
@@ -57,6 +54,7 @@ const DEFAULTS = {
     count: 8,
     strip: true,
     tracker: 'last',
+    trackerPos: 'top',
     toast: true,
     autoGenerate: false,
     defaultProfile: 'default',
@@ -113,6 +111,13 @@ const L = {
         t_api_missing: 'API profile not found, using the current connection',
         c_del: (n) => `Delete “${n}”?`, c_prof: (n) => `Delete profile “${n}”?`, c_imp: 'Also import the holidays from this file into the current chat?',
         t_today: '🎉 Today is a holiday',
+        tracker_pos: 'Tracker position', tp_top: 'top of the message', tp_bottom: 'bottom of the message',
+        busy: 'Working…', cancel: 'Cancel', tr_empty: 'No holidays yet', tr_empty_hint: 'Tap to open and generate', tr_also: 'Also today',
+        find_chat: '✨ Find new in chat',
+        t_scan_res: (h, m) => `Found mentions of ${h} holiday${h === 1 ? '' : 's'} (${m} messages checked)`,
+        t_scan_zero: (h, m) => `No mentions found — ${h} holidays, ${m} messages checked`,
+        t_scan_noh: 'No holidays yet — generate or add some first', t_cancelled: 'Cancelled',
+        t_fail_d: (m) => `Failed: ${m}`, t_chat_none: 'No new holidays found in the chat',
         gl_line: { chat: 'Write all names and text in the same language as the roleplay (chat and character card).', en: 'Write all names and text in English.', ru: 'Write all names and text in Russian.' },
     },
     ru: {
@@ -162,6 +167,13 @@ const L = {
         t_api_missing: 'API-профиль не найден, используется текущее подключение',
         c_del: (n) => `Удалить «${n}»?`, c_prof: (n) => `Удалить профиль «${n}»?`, c_imp: 'Импортировать также праздники из файла в текущий чат?',
         t_today: '🎉 Сегодня праздник',
+        tracker_pos: 'Положение трекера', tp_top: 'вверху сообщения', tp_bottom: 'внизу сообщения',
+        busy: 'Работаю…', cancel: 'Отмена', tr_empty: 'Праздников пока нет', tr_empty_hint: 'Нажмите, чтобы открыть и сгенерировать', tr_also: 'Также сегодня',
+        find_chat: '✨ Найти новые в чате',
+        t_scan_res: (h, m) => `Найдены упоминания праздников: ${h} (сообщений проверено: ${m})`,
+        t_scan_zero: (h, m) => `Упоминаний нет — праздников: ${h}, сообщений проверено: ${m}`,
+        t_scan_noh: 'Праздников пока нет — сначала сгенерируйте или добавьте', t_cancelled: 'Отменено',
+        t_fail_d: (m) => `Ошибка: ${m}`, t_chat_none: 'Новых праздников в чате не найдено',
         gl_line: { chat: 'Write all names and text in the same language as the roleplay (chat and character card).', en: 'Write all names and text in English.', ru: 'Write all names and text in Russian.' },
     },
 };
@@ -180,7 +192,8 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0 };
+let runState = null;
 const inj = { text: '' };
 let scanTimer = null;
 let obsTimer = null;
@@ -356,7 +369,7 @@ function upcoming() {
 }
 
 function mergeGenerated(list) {
-    const st = C();
+    const st = runState || C();
     const known = new Set(st.holidays.map((h) => h.name.toLowerCase())); // manual entries always win, no dupes
     let added = 0;
     for (const h of list) {
@@ -372,25 +385,42 @@ function mergeGenerated(list) {
 
 /* ------------------------------------------------------------------- scan */
 
+const STOP = new Set(['the', 'of', 'and', 'day', 'feast', 'festival', 'a', 'an', 'in', 'on', 'to', 'день', 'праздник', 'фестиваль', 'и', 'в', 'на']);
+
+function nameMatchers(name) {
+    const words = name.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    let sig = words.filter((w) => w.length >= 3 && !STOP.has(w));
+    if (!sig.length) sig = words;
+    // prefix stems tolerate Russian/English inflections ("Праздник Урожая" matches "праздника урожая")
+    return sig.map((w) => {
+        const stem = w.length > 6 ? w.slice(0, -2) : w.length > 4 ? w.slice(0, -1) : w;
+        return new RegExp(`(^|[^\\p{L}\\p{N}])${reEsc(stem)}`, 'iu');
+    });
+}
+
 function scanChat() {
     const st = C();
-    if (!st) return;
-    const chat = getContext().chat || [];
+    if (!st) return null;
+    const chat = (getContext().chat || []).filter((m) => m && !m.is_system && m.mes);
+    const all = getContext().chat || [];
     const mentions = {};
     for (const h of holidays()) {
-        const re = new RegExp(`(^|[^\\p{L}\\p{N}])${reEsc(h.name)}(?=$|[^\\p{L}\\p{N}])`, 'iu');
-        chat.forEach((m, i) => {
+        const res = nameMatchers(h.name);
+        if (!res.length) continue;
+        all.forEach((m, i) => {
             if (!m || m.is_system || !m.mes) return;
-            const hit = re.exec(m.mes);
-            if (!hit) return;
+            if (!res.every((re) => re.test(m.mes))) return;
             const rec = (mentions[h.id] ??= { first: i, last: i, count: 0, snippet: '' });
             rec.last = i;
             rec.count++;
-            rec.snippet = m.mes.slice(Math.max(0, hit.index - 40), hit.index + h.name.length + 60).replace(/\s+/g, ' ').trim();
+            const hit = res[0].exec(m.mes);
+            const at = hit ? hit.index : 0;
+            rec.snippet = m.mes.slice(Math.max(0, at - 40), at + h.name.length + 60).replace(/\s+/g, ' ').trim();
         });
     }
     st.mentions = mentions;
     saveChat();
+    return { holidays: holidays().length, found: Object.keys(mentions).length, messages: chat.length };
 }
 
 function scheduleScan() {
@@ -447,7 +477,7 @@ function applyInjection() {
     const s = S();
     const len = (getContext().chat || []).length;
     const on = inj.text && (s.frequency <= 1 || len % s.frequency === 0);
-    setExtensionPrompt(PROMPT_KEY, on ? inj.text : '', extension_prompt_types.IN_CHAT, clamp(s.depth, 0, 20), false, extension_prompt_roles.SYSTEM);
+    getContext().setExtensionPrompt?.(PROMPT_KEY, on ? inj.text : '', 1 /* IN_CHAT */, clamp(s.depth, 0, 20), false, 0 /* SYSTEM */);
 }
 
 async function refreshInjection() {
@@ -517,39 +547,73 @@ function contextBlock() {
     return parts.join('\n\n');
 }
 
+async function viaProfile(profileId, prompt, maxTokens) {
+    const svc = getContext().ConnectionManagerRequestService;
+    const messages = [
+        { role: 'system', content: `You assist with a roleplay world. Use this context as the source of truth.\n\n${contextBlock()}` },
+        { role: 'user', content: prompt },
+    ];
+    const res = await svc.sendRequest(profileId, messages, maxTokens, { stream: false, extractData: true, includePreset: true, includeInstruct: true }, {});
+    return String(res?.content ?? res ?? '');
+}
+
 async function quiet(prompt, maxTokens = 1800) {
     const s = S();
     const ctx = getContext();
-    if (s.apiProfile) {
-        const prof = profiles().find((p) => p.id === s.apiProfile);
-        const svc = ctx.ConnectionManagerRequestService;
-        if (prof && svc) {
-            const messages = [
-                { role: 'system', content: `You assist with a roleplay world. Use this context as the source of truth.\n\n${contextBlock()}` },
-                { role: 'user', content: prompt },
-            ];
-            const res = await svc.sendRequest(prof.id, messages, maxTokens, { stream: false, extractData: true, includePreset: true, includeInstruct: true }, {});
-            return String(res?.content ?? res ?? '');
-        }
+    const svc = ctx.ConnectionManagerRequestService;
+    let profId = s.apiProfile;
+    if (profId && !profiles().some((p) => p.id === profId)) {
         window.toastr?.warning(t('t_api_missing'));
+        profId = '';
     }
+    if (profId && svc) return await viaProfile(profId, prompt, maxTokens);
+
     let out = '';
     try {
         out = await ctx.generateQuietPrompt({ quietPrompt: prompt });
     } catch (e) {
-        console.warn('[Holiday Forge] object-style quiet prompt failed, trying legacy', e);
+        console.warn('[Holiday Forge] quiet prompt (object form) failed', e);
     }
-    if (!out || typeof out !== 'string') out = await ctx.generateQuietPrompt(prompt, false, false);
+    if (!out || typeof out !== 'string') {
+        try { out = await ctx.generateQuietPrompt(prompt, false, false); } catch (e) { console.warn('[Holiday Forge] quiet prompt (legacy form) failed', e); }
+    }
+    if ((!out || !String(out).trim()) && svc) {
+        const sel = ctx.extensionSettings?.connectionManager?.selectedProfile || extension_settings.connectionManager?.selectedProfile;
+        if (sel) return await viaProfile(sel, prompt, maxTokens);
+    }
     return String(out || '');
 }
 
 function parseJsonList(text) {
-    let x = text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '').trim();
+    const x = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '').trim();
     const a = x.indexOf('[');
     const b = x.lastIndexOf(']');
-    if (a >= 0 && b > a) x = x.slice(a, b + 1);
-    const data = JSON.parse(x);
-    return Array.isArray(data) ? data : data.holidays || [];
+    if (a >= 0 && b > a) {
+        try {
+            const d = JSON.parse(x.slice(a, b + 1).replace(/,\s*([\]}])/g, '$1'));
+            if (Array.isArray(d)) return d;
+        } catch { /* fall back to object-by-object parsing */ }
+    }
+    const objs = [];
+    let depth = 0, start = -1, inStr = false, skip = false;
+    for (let i = 0; i < x.length; i++) {
+        const c = x[i];
+        if (inStr) { if (skip) skip = false; else if (c === '\\') skip = true; else if (c === '"') inStr = false; continue; }
+        if (c === '"') { inStr = true; continue; }
+        if (c === '{') { if (depth === 0) start = i; depth++; }
+        else if (c === '}') {
+            depth--;
+            if (depth === 0 && start >= 0) {
+                try { objs.push(JSON.parse(x.slice(start, i + 1).replace(/,\s*}/g, '}'))); } catch { /* skip broken item */ }
+                start = -1;
+            }
+            if (depth < 0) depth = 0;
+        }
+    }
+    if (objs.length === 1 && Array.isArray(objs[0].holidays)) return objs[0].holidays;
+    if (objs.length) return objs;
+    console.warn('[Holiday Forge] unparseable reply:', text);
+    throw new Error(t('t_fail'));
 }
 
 function profileBlock(p, cal) {
@@ -632,6 +696,26 @@ ${JSON_SHAPE(cal)}
 If nothing is found, return [].`;
     const raw = await quiet(prompt);
     return mergeGenerated(normalize(parseJsonList(raw), cal, 'lorebook'));
+}
+
+async function findInChat() {
+    const p = P();
+    const cal = calendar(p);
+    const msgs = (getContext().chat || []).filter((m) => m && !m.is_system && m.mes).slice(-40);
+    if (!msgs.length) return -1;
+    const text = msgs.map((m) => `${m.name}: ${String(m.mes).slice(0, 700)}`).join('\n').slice(0, 9000);
+    const existing = holidays().map((h) => h.name).join('; ') || 'none';
+    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
+Read the roleplay excerpt below. List every holiday, festival or celebration that the characters mention, plan or celebrate. Use dates from the text if given, otherwise pick a fitting date for the calendar.
+World profile:
+${profileBlock(p, cal)}
+Already existing (skip these): ${existing}
+Excerpt:
+${text}
+
+${JSON_SHAPE(cal)}
+If nothing is found, return [].`;
+    return mergeGenerated(normalize(parseJsonList(await quiet(prompt)), cal, 'generated'));
 }
 
 async function ideasFor(h) {
@@ -792,7 +876,7 @@ function viewHistory() {
         .filter((h) => isPassed(h) || st.mentions[h.id])
         .map((h) => ({ h, m: st.mentions[h.id], passed: isPassed(h) }))
         .sort((a, b) => (a.m?.last ?? 1e9) - (b.m?.last ?? 1e9));
-    let html = `<div class="hf-actions"><button class="hf-btn primary" data-hf="scan">${t('scan_chat')}</button></div><div class="hf-sub">${t('hist_note')}</div>`;
+    let html = `<div class="hf-actions"><button class="hf-btn primary" data-hf="scan">${t('scan_chat')}</button><button class="hf-btn" data-hf="chat-find" ${ui.busy ? 'disabled' : ''}>${t('find_chat')}</button></div><div class="hf-sub">${t('hist_note')}</div>`;
     if (!items.length) return html + `<div class="hf-empty"><div class="hf-bigico">📜</div><p>${t('hist_empty')}</p></div>`;
     html += '<div class="hf-timeline">';
     for (const { h, m, passed } of items) {
@@ -849,6 +933,7 @@ function viewSettings() {
             ${num('offset', t('offset'), -3650, 3650)}
             ${num('flow', t('flow'), 0, 1440)}
             ${sel('tracker', t('tracker_opt'), [['last', t('tr_last')], ['all', t('tr_all')], ['off', t('tr_off')]])}
+            ${sel('trackerPos', t('tracker_pos'), [['top', t('tp_top')], ['bottom', t('tp_bottom')]])}
             ${chk('strip', t('strip_opt'))}
             ${chk('toast', t('toast_opt'))}</div>`;
 }
@@ -864,7 +949,8 @@ function renderBody() {
         body.innerHTML = `<div class="hf-empty"><div class="hf-bigico">💬</div><p>${t('open_chat')}</p></div>`;
     } else {
         const views = { overview: viewOverview, holidays: viewHolidays, history: viewHistory, profiles: viewProfiles, settings: viewSettings };
-        body.innerHTML = views[ui.tab]();
+        const banner = ui.busy ? `<div class="hf-busy"><span class="hf-spin"></span><span class="hf-grow">${t('busy')}</span><button class="hf-btn small" data-hf="cancel">${t('cancel')}</button></div>` : '';
+        body.innerHTML = banner + views[ui.tab]();
     }
     body.scrollTop = scroll;
     document.querySelectorAll('#hf-sheet .hf-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === ui.tab));
@@ -897,23 +983,42 @@ function renderStrip() {
 
 /* ----------------------------------------------- tracker inside chat messages */
 
+function ringInner(mins) {
+    const days = Math.floor(Math.max(0, mins) / 1440);
+    const hrs = Math.floor((Math.max(0, mins) % 1440) / 60);
+    const R = 15.5;
+    const CIRC = 2 * Math.PI * R;
+    const prog = mins <= 0 ? 1 : clamp(1 - days / 60, 0.05, 1);
+    const label = mins <= 0 ? '🎉' : days >= 1 ? `${days}` : `${hrs}${t('s_h')}`;
+    return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle class="hf-ring-bg" cx="20" cy="20" r="${R}"/><circle class="hf-ring-fg" cx="20" cy="20" r="${R}" stroke-dasharray="${(CIRC * prog).toFixed(1)} ${CIRC.toFixed(1)}" transform="rotate(-90 20 20)"/></svg><b>${label}</b>`;
+}
+
 function trackerHtml() {
     const { cal } = nowParts();
     const list = upcoming();
-    if (!list.length) return '';
-    const focus = list.find((x) => x.delta === 0) || list[0];
+    if (!list.length) {
+        return `<div class="hf-tracker hf-tr-empty" data-hf-open="1"><span class="hf-tr-ico-big">🔨</span><span class="hf-tr-main"><span class="hf-tr-title">Holiday Forge</span><span class="hf-tr-sub">${esc(visible().length ? t('nothing_upcoming') : t('tr_empty') + ' · ' + t('tr_empty_hint'))}</span></span></div>`;
+    }
+    const todays = list.filter((x) => x.delta === 0);
+    const focus = todays[0] || list[0];
     const h = focus.h;
-    const others = list.filter((x) => x !== focus).slice(0, 3);
-    const head = focus.delta === 0
-        ? `<span class="hf-tr-now">🎉 ${t('today')}</span> <b>${esc(h.name)}</b>`
-        : `<span class="hf-tr-ico">${TYPES[h.type]?.icon || '✨'}</span> <b>${esc(h.name)}</b> <span class="hf-tr-cd hf-cd-inline" data-serial="${focus.serial}">${inlineCd(focus.mins)}</span>`;
+    const others = list.filter((x) => x !== focus && !todays.includes(x)).slice(0, 3);
+    const sub = focus.delta === 0
+        ? `<b>${t('today')}</b> · ${esc(fmtMD(cal, h.month, h.day))}`
+        : `<span class="hf-cd-inline hf-tr-cd" data-serial="${focus.serial}">${inlineCd(focus.mins)}</span> · ${esc(fmtMD(cal, h.month, h.day))}`;
+    const row = (x) => `<div class="hf-tr-item" style="--c:${TYPES[x.h.type]?.color}"><span class="hf-tr-ico">${TYPES[x.h.type]?.icon || '✨'}</span><span class="hf-tr-iname">${esc(x.h.name)}</span><span class="hf-tr-when">${x.delta === 0 ? t('today') : esc(fmtMD(cal, x.h.month, x.h.day)) + ' · ' + whenLabel(x.delta)}</span></div>`;
     return `<details class="hf-tracker" style="--c:${TYPES[h.type]?.color}" ${ui.trackerOpen ? 'open' : ''}>
-        <summary><span class="hf-tr-head">${head}</span><span class="hf-tr-chev">▾</span></summary>
+        <summary>
+            <span class="hf-ring" data-serial="${focus.serial}">${ringInner(focus.mins)}</span>
+            <span class="hf-tr-main"><span class="hf-tr-title">${TYPES[h.type]?.icon || '✨'} ${esc(h.name)}</span><span class="hf-tr-sub">${sub}</span></span>
+            <span class="hf-tr-chev">▾</span>
+        </summary>
         <div class="hf-tr-body">
-            <div class="hf-tr-meta">${typeChip(h.type)} <span>${esc(fmtMD(cal, h.month, h.day))}</span>${h.tone ? ` <span>· ${esc(h.tone)}</span>` : ''}</div>
+            <div class="hf-tr-meta">${typeChip(h.type)}${h.tone ? `<span>${esc(h.tone)}</span>` : ''}</div>
             ${h.description ? `<div class="hf-tr-desc">${esc(h.description)}</div>` : ''}
             ${h.traditions ? `<div class="hf-tr-desc"><b>${t('traditions')}:</b> ${esc(h.traditions)}</div>` : ''}
-            ${others.length ? `<div class="hf-tr-list-h">${t('tr_closest')}</div>${others.map((x) => `<div class="hf-tr-item" style="--c:${TYPES[x.h.type]?.color}"><span>${TYPES[x.h.type]?.icon || '✨'} ${esc(x.h.name)}</span><span class="hf-tr-when">${esc(fmtMD(cal, x.h.month, x.h.day))} · ${whenLabel(x.delta)}</span></div>`).join('')}` : ''}
+            ${todays.length > 1 ? `<div class="hf-tr-list-h">${t('tr_also')}</div>${todays.slice(1).map(row).join('')}` : ''}
+            ${others.length ? `<div class="hf-tr-list-h">${t('tr_closest')}</div>${others.map(row).join('')}` : ''}
             <button class="hf-tr-open" data-hf-open="1">${t('tr_open')}</button>
         </div></details>`;
 }
@@ -923,25 +1028,25 @@ function ensureTracker(force = false) {
     const chat = document.getElementById('chat');
     if (!chat) return;
     const clear = () => chat.querySelectorAll('.hf-tracker-wrap').forEach((n) => n.remove());
-    const html = s.enabled && s.tracker !== 'off' && hasChat() && C() ? trackerHtml() : '';
-    if (!html) return clear();
+    if (!s.enabled || s.tracker === 'off' || !hasChat() || !C()) return clear();
 
-    const mesList = [...chat.querySelectorAll('.mes')].filter((m) => m.getAttribute('is_system') !== 'true');
-    let targets = [];
-    if (s.tracker === 'all') targets = mesList.filter((m) => m.getAttribute('is_user') !== 'true');
-    else if (mesList.length) targets = [mesList[mesList.length - 1]];
-
+    const html = trackerHtml();
+    const bots = [...chat.querySelectorAll('.mes')].filter((m) => m.getAttribute('is_system') !== 'true' && m.getAttribute('is_user') !== 'true');
+    const targets = s.tracker === 'all' ? bots : bots.length ? [bots[bots.length - 1]] : [];
     chat.querySelectorAll('.hf-tracker-wrap').forEach((n) => { if (!targets.includes(n.closest('.mes'))) n.remove(); });
+
+    const top = s.trackerPos !== 'bottom';
     for (const mes of targets) {
-        const block = mes.querySelector('.mes_block');
-        if (!block) continue;
-        let wrap = block.querySelector(':scope > .hf-tracker-wrap');
+        const mt = mes.querySelector('.mes_text');
+        if (!mt || !mt.parentElement) continue;
+        let wrap = mes.querySelector('.hf-tracker-wrap');
         if (!wrap) {
             wrap = document.createElement('div');
             wrap.className = 'hf-tracker-wrap';
-            block.appendChild(wrap);
             force = true;
         }
+        const inPlace = top ? wrap.nextElementSibling === mt : wrap.previousElementSibling === mt;
+        if (!inPlace) { if (top) mt.parentElement.insertBefore(wrap, mt); else mt.after(wrap); }
         if (force) wrap.innerHTML = html;
     }
 }
@@ -977,24 +1082,41 @@ function download(name, text) {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
-async function runBusy(fn, okMsg) {
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+async function runBusy(fn, noneKey = 't_lore_none') {
     if (ui.busy) return;
+    const id = ++ui.runId;
+    runState = C();
     ui.busy = true;
     renderBody();
     inj.text = '';
     applyInjection();
     try {
-        const n = await fn();
-        if (n === -1) window.toastr?.warning(t('t_lore_none'));
-        else window.toastr?.[n ? 'success' : 'info'](n ? t('t_added', n) : t('t_nothing'));
+        const n = await withTimeout(fn(), 180000);
+        if (id !== ui.runId) return;
+        if (n === -1) window.toastr?.warning(t(noneKey));
+        else if (n) window.toastr?.success(t('t_added', n));
+        else window.toastr?.info(t('t_nothing'));
         scanChat();
     } catch (e) {
+        if (id !== ui.runId) return;
         console.error('[Holiday Forge]', e);
-        window.toastr?.error(t('t_fail'));
+        window.toastr?.error(t('t_fail_d', e?.message || String(e)));
     }
     ui.busy = false;
+    runState = null;
     refreshAll();
     toastToday();
+}
+
+function cancelBusy() {
+    ui.runId++;
+    ui.busy = false;
+    runState = null;
+    try { getContext().stopGeneration?.(); } catch { /* ignore */ }
+    window.toastr?.info(t('t_cancelled'));
+    refreshAll();
 }
 
 const actions = {
@@ -1011,6 +1133,8 @@ const actions = {
         runBusy(() => generate(prompt));
     },
     'lore-scan': () => runBusy(scanLorebook),
+    'chat-find': () => runBusy(findInChat, 't_chat_none'),
+    cancel: () => cancelBusy(),
     add: () => { ui.editing = 'new'; renderBody(); },
     edit: (el) => { ui.editing = el.dataset.id; renderBody(); },
     'cancel-edit': () => { ui.editing = null; renderBody(); },
@@ -1051,7 +1175,14 @@ const actions = {
         refreshAll();
     },
     celebrate: (el) => { const st = C(); if (el.checked) st.celebrated[el.dataset.id] = true; else delete st.celebrated[el.dataset.id]; saveChat(); renderBody(); },
-    scan: () => { scanChat(); renderBody(); window.toastr?.info(t('t_scanned')); },
+    scan: () => {
+        const r = scanChat();
+        renderBody();
+        if (!r) return;
+        if (!r.holidays) window.toastr?.warning(t('t_scan_noh'));
+        else if (!r.found) window.toastr?.info(t('t_scan_zero', r.holidays, r.messages));
+        else window.toastr?.success(t('t_scan_res', r.found, r.messages));
+    },
     setclock: () => {
         const cal = calendar(P());
         const g = (id) => parseInt(document.getElementById(id)?.value, 10) || 0;
@@ -1247,6 +1378,7 @@ function syncDrawer() {
 /* -------------------------------------------------------------------- init */
 
 async function onChat() {
+    if (ui.busy) { ui.runId++; ui.busy = false; runState = null; }
     ui.editing = null;
     ui.ideas = {};
     if (!hasChat()) { renderStrip(); ensureTracker(true); inj.text = ''; applyInjection(); renderBody(); return; }
@@ -1268,37 +1400,49 @@ function tick() {
     const total = clockMinutes(true);
     document.querySelectorAll('.hf-cd').forEach((el) => { el.innerHTML = cdTiles(+el.dataset.serial * 1440 - total); });
     document.querySelectorAll('.hf-cd-inline').forEach((el) => { el.textContent = inlineCd(+el.dataset.serial * 1440 - total); });
+    document.querySelectorAll('.hf-ring').forEach((el) => { el.innerHTML = ringInner(+el.dataset.serial * 1440 - total); });
     if (S().flow > 0) { toastToday(); refreshInjection(); }
 }
 
 jQuery(async () => {
-    S();
-    mountDrawer();
-    buildPanel();
+    try {
+        S();
+        mountDrawer();
+        buildPanel();
 
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui.open) closePanel(); });
-    // tracker: remember open state, open the panel from the button
-    document.addEventListener('toggle', (e) => { if (e.target?.classList?.contains('hf-tracker')) ui.trackerOpen = e.target.open; }, true);
-    document.addEventListener('click', (e) => { if (e.target.closest?.('[data-hf-open]')) openPanel(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui.open) closePanel(); });
+        document.addEventListener('toggle', (e) => { if (e.target?.classList?.contains('hf-tracker')) ui.trackerOpen = e.target.open; }, true);
+        document.addEventListener('click', (e) => { if (e.target.closest?.('[data-hf-open]')) openPanel(); });
 
-    const chatEl = document.getElementById('chat');
-    if (chatEl) {
-        new MutationObserver(() => {
-            clearTimeout(obsTimer);
-            obsTimer = setTimeout(() => ensureTracker(false), 150);
-        }).observe(chatEl, { childList: true });
+        const chatEl = document.getElementById('chat');
+        if (chatEl) {
+            new MutationObserver(() => {
+                clearTimeout(obsTimer);
+                obsTimer = setTimeout(() => ensureTracker(false), 150);
+            }).observe(chatEl, { childList: true });
+        }
+
+        const ctx = getContext();
+        const es = ctx.eventSource;
+        const ev = ctx.eventTypes || ctx.event_types || {};
+        const on = (name, fn) => { if (ev[name]) es.on(ev[name], fn); };
+        const later = () => setTimeout(() => ensureTracker(false), 200);
+
+        on('APP_READY', () => { mountDrawer(); onChat(); });
+        on('CHAT_CHANGED', onChat);
+        on('MESSAGE_RECEIVED', () => { scheduleScan(); refreshInjection(); later(); });
+        on('MESSAGE_SENT', () => { scheduleScan(); refreshInjection(); });
+        on('MESSAGE_DELETED', () => { scheduleScan(); later(); });
+        ['CHARACTER_MESSAGE_RENDERED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED'].forEach((n) => on(n, later));
+        on('GENERATION_STARTED', async (type, _params, dryRun) => {
+            if (type === 'quiet' || dryRun) return applyInjection();
+            await refreshInjection();
+        });
+
+        setInterval(tick, 5000);
+        onChat();
+    } catch (e) {
+        console.error('[Holiday Forge] init failed', e);
+        window.toastr?.error('Holiday Forge failed to start: ' + (e?.message || e));
     }
-
-    eventSource.on(event_types.APP_READY, () => { mountDrawer(); onChat(); });
-    eventSource.on(event_types.CHAT_CHANGED, onChat);
-    eventSource.on(event_types.MESSAGE_RECEIVED, () => { scheduleScan(); refreshInjection(); setTimeout(() => ensureTracker(false), 200); });
-    eventSource.on(event_types.MESSAGE_SENT, () => { scheduleScan(); refreshInjection(); });
-    eventSource.on(event_types.MESSAGE_DELETED, () => { scheduleScan(); setTimeout(() => ensureTracker(false), 200); });
-    eventSource.on(event_types.GENERATION_STARTED, async (type, _params, dryRun) => {
-        if (type === 'quiet' || dryRun) return applyInjection();
-        await refreshInjection();
-    });
-
-    setInterval(tick, 5000);
-    onChat();
 });
