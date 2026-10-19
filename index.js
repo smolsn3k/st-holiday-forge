@@ -1,23 +1,91 @@
-// Holiday Forge v1.1 — SillyTavern extension
+// Holiday Forge v1.3 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
-import { extension_settings, getContext } from '../../../extensions.js';
-
-// Everything else comes from getContext() so a renamed export in a newer SillyTavern cannot break loading.
-let _sd = null;
-import('../../../../script.js').then((m) => { _sd = m.saveSettingsDebounced; }).catch(() => {});
-const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || _sd)?.(); };
+// No static imports from SillyTavern internals (paths/exports change between versions and a failed import
+// silently kills the whole extension). Everything comes from the global SillyTavern context.
+const getContext = () => globalThis.SillyTavern.getContext();
+let stModule = null;
+import('../../../../script.js').then((m) => { stModule = m; }).catch(() => {});
+let extMod = null;
+import('../../../extensions.js').then((m) => { extMod = m; }).catch(() => {});
+const ES_FALLBACK = {};
+const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
+const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
 
 const TYPES = {
-    religious: { icon: '🕯️', color: '#e0b04a' },
-    cultural: { icon: '🎭', color: '#d9718f' },
-    seasonal: { icon: '🍂', color: '#5fb87a' },
-    personal: { icon: '💝', color: '#7aa2f7' },
+    religious: { fa: 'fa-church', color: '#e0b04a' },
+    cultural: { fa: 'fa-masks-theater', color: '#d9718f' },
+    seasonal: { fa: 'fa-leaf', color: '#5fb87a' },
+    personal: { fa: 'fa-cake-candles', color: '#7aa2f7' },
 };
+
+// Holiday icons (Font Awesome 6 free, bundled with SillyTavern). The LLM picks a word from this list.
+const ICONS = {
+    tree: 'fa-tree', snow: 'fa-snowflake', star: 'fa-star', egg: 'fa-egg', sun: 'fa-sun', heart: 'fa-heart',
+    flower: 'fa-seedling', shield: 'fa-shield-halved', flag: 'fa-flag', ghost: 'fa-ghost', moon: 'fa-moon',
+    leaf: 'fa-leaf', wheat: 'fa-wheat-awn', fire: 'fa-fire', bell: 'fa-bell', church: 'fa-church', cross: 'fa-cross',
+    dove: 'fa-dove', gift: 'fa-gift', glass: 'fa-champagne-glasses', music: 'fa-music', mask: 'fa-masks-theater',
+    ring: 'fa-ring', cake: 'fa-cake-candles', book: 'fa-book', crown: 'fa-crown', work: 'fa-briefcase',
+    school: 'fa-graduation-cap', beach: 'fa-umbrella-beach', candy: 'fa-candy-cane', mug: 'fa-mug-hot',
+    skull: 'fa-skull', feather: 'fa-feather', cookie: 'fa-cookie', tent: 'fa-campground', pray: 'fa-hands-praying',
+    drum: 'fa-drum', fish: 'fa-fish', gem: 'fa-gem', dragon: 'fa-dragon', wizard: 'fa-hat-wizard', anchor: 'fa-anchor',
+};
+const ICON_WORDS = Object.keys(ICONS);
+
+function iconKey(v) {
+    const x = String(v || '').trim().toLowerCase().replace(/^fa-/, '');
+    if (ICONS[x]) return x;
+    const hit = Object.entries(ICONS).find(([, fa]) => fa === `fa-${x}`);
+    return hit ? hit[0] : '';
+}
+
+const ICON_BY_NAME = [
+    [/(нов(ый|ого|ым)\s+год|new\s*year|hogmanay|сочельник)/i, 'tree'],
+    [/(рождеств|christmas|xmas|yule|святки)/i, 'star'],
+    [/(пасх|easter)/i, 'egg'],
+    [/(маслениц|pancake|shrovetide)/i, 'sun'],
+    [/(валентин|valentine|влюбл|любов|love)/i, 'heart'],
+    [/(8\s*марта|женск|women|mother|матер)/i, 'flower'],
+    [/(защитник|отечеств|defender|veteran|воин|war|battle|битв|войн)/i, 'shield'],
+    [/(независим|единств|independence|national|republic|конституц|founding|основан)/i, 'flag'],
+    [/(хэллоуин|halloween|самайн|samhain|мертв|мёртв|dead|spirit|дух)/i, 'ghost'],
+    [/(купал|солнцеворот|солнцестоя|midsummer|solstice|bonfire|костер|костёр)/i, 'fire'],
+    [/(урожа|жатв|harvest|осенин|thanksgiving|grain|зерн)/i, 'wheat'],
+    [/(луна|лунн|moon|night|ночь|рамадан|ramadan|пост\b|fast|lent)/i, 'moon'],
+    [/(зим|winter|snow|снег|мороз|frost)/i, 'snow'],
+    [/(свадьб|венчан|wedding|годовщин|anniversary)/i, 'ring'],
+    [/(день\s*рожд|именин|birthday)/i, 'cake'],
+    [/(знани|выпускн|школ|академ|university|graduation|school)/i, 'school'],
+    [/(корпоратив|работ|офис|corporate|guild|гильд|trade|торг)/i, 'work'],
+    [/(вечеринк|party|бал\b|ball\b|пир\b|feast|банкет|banquet)/i, 'glass'],
+    [/(концерт|фестивал|concert|festival|музык|песн|song)/i, 'music'],
+    [/(маскарад|карнавал|carnival|masquerade|театр)/i, 'mask'],
+    [/(поминк|поминал|память|memorial|funeral|похорон|remembrance)/i, 'feather'],
+    [/(молитв|prayer|pray|храм|temple|святы|holy|sacred|божеств|god|богин|goddess)/i, 'pray'],
+    [/(корон|coron|королев|король|king|queen|imperial|император)/i, 'crown'],
+    [/(море|sea|ocean|рыб|fisher|корабл|harbor|порт)/i, 'anchor'],
+    [/(дракон|dragon)/i, 'dragon'],
+    [/(магия|magic|маг\b|wizard|arcane|колдов)/i, 'wizard'],
+    [/(поездк|путешеств|пикник|trip|picnic|вылазк|pilgrim|паломн)/i, 'tent'],
+    [/(чаепит|посиделк|tea\b)/i, 'mug'],
+    [/(подар|gift)/i, 'gift'],
+    [/(книг|book|scholar|learning|library)/i, 'book'],
+];
+const ICON_BY_TYPE = { religious: 'church', cultural: 'mask', seasonal: 'leaf', personal: 'cake' };
+
+function holidayIcon(h) {
+    if (!h) return 'fa-calendar-days';
+    if (h.icon && ICONS[h.icon]) return ICONS[h.icon];
+    const name = `${h.name || ''} ${h.description || ''}`;
+    for (const [re, k] of ICON_BY_NAME) if (re.test(name)) return ICONS[k];
+    return ICONS[ICON_BY_TYPE[h.type]] || 'fa-star';
+}
+
+const hIcon = (h) => `<i class="fa-solid ${holidayIcon(h)}"></i>`;
 
 const GREGORIAN = [
     ['January', 31], ['February', 28], ['March', 31], ['April', 30], ['May', 31], ['June', 30],
@@ -71,28 +139,28 @@ const L = {
         all: 'All', today: 'Today', tomorrow: 'Tomorrow', in_days: (n) => `in ${n}d`,
         u_days: 'days', u_hours: 'hours', u_min: 'min', s_d: 'd', s_h: 'h',
         no_holidays: 'No holidays in this chat yet.', gen_first: 'Generate holidays',
-        scene_ideas: '💡 Scene ideas', thinking: '⏳ Thinking…', next3: 'Next 3', nothing_upcoming: 'Nothing upcoming.',
+        scene_ideas: '<i class="fa-solid fa-lightbulb"></i> Scene ideas', thinking: '<i class="fa-solid fa-hourglass-half"></i> Thinking…', next3: 'Next 3', nothing_upcoming: 'Nothing upcoming.',
         clock: 'In-world date:', day: 'Day', month: 'Month', year: 'Year', hour: 'Hour',
         set_date: 'Set date', plus1: '+1 day', plus7: '+7 days',
-        edit: '✏️ Edit', hide: '🙈 Hide', show: '👁️ Show', del: '🗑️ Delete', hidden: 'hidden',
-        src_manual: '✍️ manual', src_generated: '✨ generated', src_lorebook: '📚 lorebook',
+        edit: '<i class="fa-solid fa-pen"></i> Edit', hide: '<i class="fa-solid fa-eye-slash"></i> Hide', show: '<i class="fa-solid fa-eye"></i> Show', del: '<i class="fa-solid fa-trash"></i> Delete', hidden: 'hidden',
+        src_manual: '<i class="fa-solid fa-pen-nib"></i> manual', src_generated: '<i class="fa-solid fa-wand-magic-sparkles"></i> generated', src_lorebook: '<i class="fa-solid fa-book-open"></i> lorebook',
         traditions: 'Traditions', tone: 'Tone', description: 'Description',
-        gen_h: '✨ Generate with LLM', gen_ph: 'Optional: e.g. harvest festivals, a holiday for the elves, something tied to the war…',
-        count: 'Count', generate: '✨ Generate', generating: '⏳ Generating…', add_own: '➕ Add own', scan_lore: '📚 Scan lorebook',
+        gen_h: '<i class="fa-solid fa-wand-magic-sparkles"></i> Generate with LLM', gen_ph: 'Optional: e.g. harvest festivals, a holiday for the elves, something tied to the war…',
+        count: 'Count', generate: '<i class="fa-solid fa-wand-magic-sparkles"></i> Generate', generating: '<i class="fa-solid fa-hourglass-half"></i> Generating…', add_own: '<i class="fa-solid fa-plus"></i> Add own', scan_lore: '<i class="fa-solid fa-book-open"></i> Scan lorebook',
         api_profile: 'API profile', api_current: 'Current connection', api_missing: 'Connection Manager extension not found or has no profiles.',
-        nothing_here: 'Nothing here.', new_holiday: '➕ New holiday', edit_holiday: '✏️ Edit holiday',
-        name: 'Name', year_opt: 'Year (optional, one-off)', type: 'Type', save: '💾 Save', cancel: 'Cancel',
+        nothing_here: 'Nothing here.', new_holiday: '<i class="fa-solid fa-plus"></i> New holiday', edit_holiday: '<i class="fa-solid fa-pen"></i> Edit holiday',
+        name: 'Name', year_opt: 'Year (optional, one-off)', type: 'Type', save: '<i class="fa-solid fa-floppy-disk"></i> Save', cancel: 'Cancel',
         tone_ph: 'e.g. joyful, solemn', editor_note: 'Saved entries become manual and override generated ones with the same name.',
-        scan_chat: '🔍 Scan chat',
+        scan_chat: '<i class="fa-solid fa-magnifying-glass"></i> Scan chat',
         hist_note: 'Looks for holiday names in messages. A holiday counts as passed once it is mentioned and its in-world date is behind the current date, or when you mark it manually.',
         hist_empty: 'No celebrations on the timeline yet.', passed: 'passed', mentioned: 'mentioned', msg: 'msg', mark_cel: 'Mark as celebrated',
-        prof_chat_h: '🌍 World profile for this chat', new: '➕ New', dup: '⧉ Duplicate', delete: '🗑️ Delete',
-        edit_prof: (n) => `✏️ Edit “${n}”`, prof_name: 'Profile name', world_name: 'World name', faith: 'Faith system',
+        prof_chat_h: '<i class="fa-solid fa-earth-europe"></i> World profile for this chat', new: '<i class="fa-solid fa-plus"></i> New', dup: '<i class="fa-solid fa-clone"></i> Duplicate', delete: '<i class="fa-solid fa-trash"></i> Delete',
+        edit_prof: (n) => `<i class="fa-solid fa-pen"></i> Edit “${n}”`, prof_name: 'Profile name', world_name: 'World name', faith: 'Faith system',
         faith_ph: 'e.g. Moon Church, ancestor worship', region: 'Region / culture', calendar: 'Calendar',
         cal_greg: 'Gregorian (12 months)', cal_custom: 'Custom', months_label: 'Months (Name:days, comma or newline separated)',
         months_ph: 'Frostmoon:30, Seedmoon:28, Sunpeak:31', rules: 'Custom rules',
         rules_ph: 'e.g. No holidays on the winter solstice; the empire bans religious festivals',
-        export: '⬇️ Export JSON', import: '⬆️ Import JSON',
+        export: '<i class="fa-solid fa-download"></i> Export JSON', import: '<i class="fa-solid fa-upload"></i> Import JSON',
         s_gen: 'Generation', style: 'Style', per_gen: 'Holidays per generation', auto_gen: 'Auto-generate when a chat has no holidays',
         use_lore: 'Include lorebook (World Info) when generating',
         s_ai: 'Character awareness', enabled: 'Extension enabled', inject: 'Inject holidays into the prompt',
@@ -103,17 +171,17 @@ const L = {
         tracker_opt: 'Tracker inside chat messages', tr_last: 'last message only', tr_all: 'every character message', tr_off: 'off',
         s_lang: 'Language', lang_ui: 'Interface language', lang_auto: 'Auto', gen_lang: 'Generated text language', gl_chat: 'Match the chat',
         open_chat: 'Open a chat to use Holiday Forge.', drawer_enabled: 'Enabled', drawer_open: 'Open Holiday Forge',
-        tr_closest: 'Closest holidays', tr_open: 'Open Holiday Forge',
+        tr_closest: 'Closest holidays', tr_open: 'Open Holiday Forge', icon: 'Icon', icon_auto: 'Auto',
         t_added: (n) => `Added ${n} holiday${n > 1 ? 's' : ''}`, t_nothing: 'Nothing new was added',
         t_fail: 'Generation failed or the reply was not valid JSON. Try again.', t_scanned: 'Chat scanned',
         t_name: 'Give it a name', t_lore_none: 'No usable lorebook entries found', t_invalid: 'Invalid profile file',
         t_imported: 'Profile imported', t_keep1: 'Keep at least one profile', t_ideas_fail: 'Could not get ideas',
         t_api_missing: 'API profile not found, using the current connection',
         c_del: (n) => `Delete “${n}”?`, c_prof: (n) => `Delete profile “${n}”?`, c_imp: 'Also import the holidays from this file into the current chat?',
-        t_today: '🎉 Today is a holiday',
+        t_today: 'Today is a holiday',
         tracker_pos: 'Tracker position', tp_top: 'top of the message', tp_bottom: 'bottom of the message',
         busy: 'Working…', cancel: 'Cancel', tr_empty: 'No holidays yet', tr_empty_hint: 'Tap to open and generate', tr_also: 'Also today',
-        find_chat: '✨ Find new in chat',
+        find_chat: '<i class="fa-solid fa-wand-magic-sparkles"></i> Find new in chat',
         t_scan_res: (h, m) => `Found mentions of ${h} holiday${h === 1 ? '' : 's'} (${m} messages checked)`,
         t_scan_zero: (h, m) => `No mentions found — ${h} holidays, ${m} messages checked`,
         t_scan_noh: 'No holidays yet — generate or add some first', t_cancelled: 'Cancelled',
@@ -127,28 +195,28 @@ const L = {
         all: 'Все', today: 'Сегодня', tomorrow: 'Завтра', in_days: (n) => `через ${n} дн.`,
         u_days: 'дней', u_hours: 'часов', u_min: 'мин', s_d: 'д', s_h: 'ч',
         no_holidays: 'В этом чате пока нет праздников.', gen_first: 'Сгенерировать праздники',
-        scene_ideas: '💡 Идеи для сцен', thinking: '⏳ Думаю…', next3: 'Ближайшие 3', nothing_upcoming: 'Ничего не намечается.',
+        scene_ideas: '<i class="fa-solid fa-lightbulb"></i> Идеи для сцен', thinking: '<i class="fa-solid fa-hourglass-half"></i> Думаю…', next3: 'Ближайшие 3', nothing_upcoming: 'Ничего не намечается.',
         clock: 'Дата в мире:', day: 'День', month: 'Месяц', year: 'Год', hour: 'Час',
         set_date: 'Установить дату', plus1: '+1 день', plus7: '+7 дней',
-        edit: '✏️ Изменить', hide: '🙈 Скрыть', show: '👁️ Показать', del: '🗑️ Удалить', hidden: 'скрыт',
-        src_manual: '✍️ вручную', src_generated: '✨ сгенерирован', src_lorebook: '📚 лорбук',
+        edit: '<i class="fa-solid fa-pen"></i> Изменить', hide: '<i class="fa-solid fa-eye-slash"></i> Скрыть', show: '<i class="fa-solid fa-eye"></i> Показать', del: '<i class="fa-solid fa-trash"></i> Удалить', hidden: 'скрыт',
+        src_manual: '<i class="fa-solid fa-pen-nib"></i> вручную', src_generated: '<i class="fa-solid fa-wand-magic-sparkles"></i> сгенерирован', src_lorebook: '<i class="fa-solid fa-book-open"></i> лорбук',
         traditions: 'Традиции', tone: 'Тон', description: 'Описание',
-        gen_h: '✨ Генерация через LLM', gen_ph: 'Необязательно: например, праздники урожая, праздник эльфов, что-то связанное с войной…',
-        count: 'Кол-во', generate: '✨ Сгенерировать', generating: '⏳ Генерация…', add_own: '➕ Свой праздник', scan_lore: '📚 Скан лорбука',
+        gen_h: '<i class="fa-solid fa-wand-magic-sparkles"></i> Генерация через LLM', gen_ph: 'Необязательно: например, праздники урожая, праздник эльфов, что-то связанное с войной…',
+        count: 'Кол-во', generate: '<i class="fa-solid fa-wand-magic-sparkles"></i> Сгенерировать', generating: '<i class="fa-solid fa-hourglass-half"></i> Генерация…', add_own: '<i class="fa-solid fa-plus"></i> Свой праздник', scan_lore: '<i class="fa-solid fa-book-open"></i> Скан лорбука',
         api_profile: 'API-профиль', api_current: 'Текущее подключение', api_missing: 'Расширение Connection Manager не найдено или в нём нет профилей.',
-        nothing_here: 'Здесь пусто.', new_holiday: '➕ Новый праздник', edit_holiday: '✏️ Изменить праздник',
-        name: 'Название', year_opt: 'Год (необязательно, разовый)', type: 'Тип', save: '💾 Сохранить', cancel: 'Отмена',
+        nothing_here: 'Здесь пусто.', new_holiday: '<i class="fa-solid fa-plus"></i> Новый праздник', edit_holiday: '<i class="fa-solid fa-pen"></i> Изменить праздник',
+        name: 'Название', year_opt: 'Год (необязательно, разовый)', type: 'Тип', save: '<i class="fa-solid fa-floppy-disk"></i> Сохранить', cancel: 'Отмена',
         tone_ph: 'например, радостный, торжественный', editor_note: 'Сохранённые записи становятся ручными и заменяют сгенерированные с тем же названием.',
-        scan_chat: '🔍 Сканировать чат',
+        scan_chat: '<i class="fa-solid fa-magnifying-glass"></i> Сканировать чат',
         hist_note: 'Ищет названия праздников в сообщениях. Праздник считается прошедшим, если он упомянут и его внутримировая дата уже позади, либо если вы отметили его вручную.',
         hist_empty: 'В хронологии пока нет праздников.', passed: 'прошёл', mentioned: 'упомянут', msg: 'сообщ.', mark_cel: 'Отметить как отпразднованный',
-        prof_chat_h: '🌍 Профиль мира для этого чата', new: '➕ Новый', dup: '⧉ Дублировать', delete: '🗑️ Удалить',
-        edit_prof: (n) => `✏️ Редактирование «${n}»`, prof_name: 'Название профиля', world_name: 'Название мира', faith: 'Система верований',
+        prof_chat_h: '<i class="fa-solid fa-earth-europe"></i> Профиль мира для этого чата', new: '<i class="fa-solid fa-plus"></i> Новый', dup: '<i class="fa-solid fa-clone"></i> Дублировать', delete: '<i class="fa-solid fa-trash"></i> Удалить',
+        edit_prof: (n) => `<i class="fa-solid fa-pen"></i> Редактирование «${n}»`, prof_name: 'Название профиля', world_name: 'Название мира', faith: 'Система верований',
         faith_ph: 'например, Лунная церковь, культ предков', region: 'Регион / культура', calendar: 'Календарь',
         cal_greg: 'Григорианский (12 месяцев)', cal_custom: 'Свой', months_label: 'Месяцы (Название:дней, через запятую или с новой строки)',
         months_ph: 'Морозень:30, Сеяние:28, Солнцепик:31', rules: 'Свои правила',
         rules_ph: 'например, нет праздников в зимнее солнцестояние; империя запрещает религиозные обряды',
-        export: '⬇️ Экспорт JSON', import: '⬆️ Импорт JSON',
+        export: '<i class="fa-solid fa-download"></i> Экспорт JSON', import: '<i class="fa-solid fa-upload"></i> Импорт JSON',
         s_gen: 'Генерация', style: 'Стиль', per_gen: 'Праздников за раз', auto_gen: 'Автогенерация, если в чате нет праздников',
         use_lore: 'Учитывать лорбук (World Info) при генерации',
         s_ai: 'Осведомлённость персонажей', enabled: 'Расширение включено', inject: 'Добавлять праздники в промпт',
@@ -159,17 +227,17 @@ const L = {
         tracker_opt: 'Трекер внутри сообщений чата', tr_last: 'только последнее сообщение', tr_all: 'каждое сообщение персонажа', tr_off: 'выкл.',
         s_lang: 'Язык', lang_ui: 'Язык интерфейса', lang_auto: 'Авто', gen_lang: 'Язык сгенерированного текста', gl_chat: 'Как в чате',
         open_chat: 'Откройте чат, чтобы пользоваться Holiday Forge.', drawer_enabled: 'Включено', drawer_open: 'Открыть Holiday Forge',
-        tr_closest: 'Ближайшие праздники', tr_open: 'Открыть Holiday Forge',
+        tr_closest: 'Ближайшие праздники', tr_open: 'Открыть Holiday Forge', icon: 'Значок', icon_auto: 'Авто',
         t_added: (n) => `Добавлено праздников: ${n}`, t_nothing: 'Ничего нового не добавлено',
         t_fail: 'Не удалось сгенерировать или ответ не в формате JSON. Попробуйте ещё раз.', t_scanned: 'Чат просканирован',
         t_name: 'Укажите название', t_lore_none: 'Подходящих записей лорбука не найдено', t_invalid: 'Неверный файл профиля',
         t_imported: 'Профиль импортирован', t_keep1: 'Нужен хотя бы один профиль', t_ideas_fail: 'Не удалось получить идеи',
         t_api_missing: 'API-профиль не найден, используется текущее подключение',
         c_del: (n) => `Удалить «${n}»?`, c_prof: (n) => `Удалить профиль «${n}»?`, c_imp: 'Импортировать также праздники из файла в текущий чат?',
-        t_today: '🎉 Сегодня праздник',
+        t_today: 'Сегодня праздник',
         tracker_pos: 'Положение трекера', tp_top: 'вверху сообщения', tp_bottom: 'внизу сообщения',
         busy: 'Работаю…', cancel: 'Отмена', tr_empty: 'Праздников пока нет', tr_empty_hint: 'Нажмите, чтобы открыть и сгенерировать', tr_also: 'Также сегодня',
-        find_chat: '✨ Найти новые в чате',
+        find_chat: '<i class="fa-solid fa-wand-magic-sparkles"></i> Найти новые в чате',
         t_scan_res: (h, m) => `Найдены упоминания праздников: ${h} (сообщений проверено: ${m})`,
         t_scan_zero: (h, m) => `Упоминаний нет — праздников: ${h}, сообщений проверено: ${m}`,
         t_scan_noh: 'Праздников пока нет — сначала сгенерируйте или добавьте', t_cancelled: 'Отменено',
@@ -179,7 +247,7 @@ const L = {
 };
 
 function lang() {
-    const v = extension_settings[MODULE]?.lang;
+    const v = ES()[MODULE]?.lang;
     if (v === 'en' || v === 'ru') return v;
     const ui = (localStorage.getItem('language') || navigator.language || 'en').toLowerCase();
     return ui.startsWith('ru') ? 'ru' : 'en';
@@ -192,7 +260,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0 };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '' };
 let runState = null;
 const inj = { text: '' };
 let scanTimer = null;
@@ -204,7 +272,7 @@ const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function S() {
-    const s = (extension_settings[MODULE] ??= {});
+    const s = (ES()[MODULE] ??= {});
     for (const k of Object.keys(DEFAULTS)) {
         if (!(k in s)) s[k] = structuredClone(DEFAULTS[k]);
     }
@@ -217,22 +285,41 @@ function newProfile(id, name) {
     return { id, name, world: '', faith: '', calendarType: 'gregorian', months: '', region: '', rules: '' };
 }
 
+const freshState = () => ({ profileId: null, holidays: [], celebrated: {}, mentions: {}, clock: null, toastKey: null, autoDone: false });
+
+function chatIdNow() {
+    const ctx = getContext();
+    return ctx.chatId ?? ctx.getCurrentChatId?.() ?? null;
+}
+
 function hasChat() {
     const ctx = getContext();
-    return !!(ctx.chatId ?? ctx.getCurrentChatId?.());
+    return !!chatIdNow() || ctx.characterId !== undefined || !!ctx.groupId;
 }
 
 function C() {
-    const md = getContext().chatMetadata;
-    if (!md) return null;
-    md[META] ??= { profileId: null, holidays: [], celebrated: {}, mentions: {}, clock: null, toastKey: null, autoDone: false };
-    return md[META];
+    const ctx = getContext();
+    const md = ctx.chatMetadata || stModule?.chat_metadata;
+    if (md && typeof md === 'object') {
+        md[META] ??= freshState();
+        return md[META];
+    }
+    // fallback if chat metadata is not exposed: keep state in extension settings, keyed by chat
+    if (!hasChat()) return null;
+    const key = String(chatIdNow() ?? ctx.characterId ?? ctx.groupId);
+    const store = (ES().holidayForgeChats ??= {});
+    return (store[key] ??= freshState());
 }
 
 function saveChat() {
     const ctx = getContext();
-    if (ctx.saveMetadataDebounced) ctx.saveMetadataDebounced();
-    else ctx.saveMetadata?.();
+    if (ctx.chatMetadata || stModule?.chat_metadata) {
+        if (ctx.saveMetadataDebounced) ctx.saveMetadataDebounced();
+        else if (ctx.saveMetadata) ctx.saveMetadata();
+        else stModule?.saveMetadata?.();
+    } else {
+        saveSettingsDebounced();
+    }
 }
 
 function P() {
@@ -493,7 +580,7 @@ async function refreshInjection() {
 /* ------------------------------------------- lorebook, API profiles, LLM */
 
 function profiles() {
-    const cm = getContext().extensionSettings?.connectionManager || extension_settings.connectionManager;
+    const cm = getContext().extensionSettings?.connectionManager || ES().connectionManager;
     return Array.isArray(cm?.profiles) ? cm.profiles : [];
 }
 
@@ -578,7 +665,7 @@ async function quiet(prompt, maxTokens = 1800) {
         try { out = await ctx.generateQuietPrompt(prompt, false, false); } catch (e) { console.warn('[Holiday Forge] quiet prompt (legacy form) failed', e); }
     }
     if ((!out || !String(out).trim()) && svc) {
-        const sel = ctx.extensionSettings?.connectionManager?.selectedProfile || extension_settings.connectionManager?.selectedProfile;
+        const sel = ctx.extensionSettings?.connectionManager?.selectedProfile || ES().connectionManager?.selectedProfile;
         if (sel) return await viaProfile(sel, prompt, maxTokens);
     }
     return String(out || '');
@@ -634,7 +721,12 @@ function normalize(list, cal, source) {
             if (typeof month === 'string' && isNaN(+month)) {
                 const q = month.trim().toLowerCase();
                 const i = cal.findIndex((c) => c.name.toLowerCase() === q || (c.gen && c.gen.toLowerCase() === q));
-                month = i >= 0 ? i + 1 : 1;
+                let j = i;
+                if (j < 0 && cal.length === 12) {
+                    // gregorian calendar: accept English or Russian month names whatever the UI language is
+                    j = GREGORIAN.findIndex(([n], k) => n.toLowerCase() === q || GREG_RU[k][0].toLowerCase() === q || GREG_RU[k][1] === q);
+                }
+                month = j >= 0 ? j + 1 : 1;
             }
             month = mIdx(cal, month);
             return {
@@ -647,6 +739,7 @@ function normalize(list, cal, source) {
                 description: String(x.description || '').trim(),
                 traditions: String(x.traditions || '').trim(),
                 tone: String(x.tone || '').trim(),
+                icon: iconKey(x.icon),
                 source,
                 hidden: false,
             };
@@ -654,7 +747,7 @@ function normalize(list, cal, source) {
 }
 
 const JSON_SHAPE = (cal) => `Return ONLY a valid JSON array. No markdown, no commentary. Each item:
-{"name":"","month":<number 1-${cal.length}>,"day":<number>,"type":"religious|cultural|seasonal|personal","description":"1-2 sentences","traditions":"1-3 short customs","tone":"2-3 words"}
+{"name":"","month":<number 1-${cal.length}>,"day":<number>,"type":"religious|cultural|seasonal|personal","description":"1-2 sentences","traditions":"1-3 short customs","tone":"2-3 words","icon":"<one word from: ${ICON_WORDS.join(', ')}>"}
 Keep the "type" value in English. ${t('gl_line')[S().genLang] || t('gl_line').chat}`;
 
 async function generate(userPrompt) {
@@ -727,7 +820,7 @@ Suggest 3 short, concrete scene ideas (one sentence each, as a bullet list) for 
 
 /* ------------------------------------------------------------------- html */
 
-const typeChip = (ty) => `<span class="hf-chip" style="--c:${TYPES[ty]?.color || '#999'}">${TYPES[ty]?.icon || '✨'} ${esc(t('type_' + ty))}</span>`;
+const typeChip = (ty) => `<span class="hf-chip" style="--c:${TYPES[ty]?.color || '#999'}"><i class="fa-solid ${TYPES[ty]?.fa || 'fa-star'}"></i> ${esc(t('type_' + ty))}</span>`;
 const srcLabel = (h) => t('src_' + (h.source || 'generated'));
 
 function cdTiles(totalMin) {
@@ -748,7 +841,7 @@ function whenLabel(delta) {
 function miniRow(x, cal) {
     const h = x.h;
     return `<div class="hf-row" style="--c:${TYPES[h.type]?.color}">
-        <div class="hf-ico">${TYPES[h.type]?.icon || '✨'}</div>
+        <div class="hf-ico">${hIcon(h)}</div>
         <div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}</div></div>
         <div class="hf-when ${x.delta === 0 ? 'now' : ''}">${whenLabel(x.delta)}</div></div>`;
 }
@@ -770,11 +863,11 @@ function viewOverview() {
     const next = list.find((x) => x.delta > 0);
     let html = '';
     if (!visible().length) {
-        html += `<div class="hf-empty"><div class="hf-bigico">🎆</div><p>${t('no_holidays')}</p>
+        html += `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-calendar-days"></i></div><p>${t('no_holidays')}</p>
             <button class="hf-btn primary" data-hf="goto" data-tab="holidays">${t('gen_first')}</button></div>`;
     } else {
         for (const x of today) {
-            html += `<div class="hf-today" style="--c:${TYPES[x.h.type]?.color}"><div class="hf-today-h">🎉 ${t('today')} — ${esc(x.h.name)}</div>
+            html += `<div class="hf-today" style="--c:${TYPES[x.h.type]?.color}"><div class="hf-today-h"><i class="fa-solid fa-champagne-glasses"></i> ${t('today')} — ${esc(x.h.name)}</div>
                 <div class="hf-sub">${esc(x.h.description)}</div>${x.h.traditions ? `<div class="hf-sub"><b>${t('traditions')}:</b> ${esc(x.h.traditions)}</div>` : ''}
                 <button class="hf-btn small" data-hf="ideas" data-id="${x.h.id}">${t('scene_ideas')}</button>
                 <div class="hf-ideas">${esc(ui.ideas[x.h.id] || '')}</div></div>`;
@@ -791,7 +884,7 @@ function viewOverview() {
         html += `<div class="hf-h">${t('next3')}</div><div class="hf-card">${list.slice(0, 3).map((x) => miniRow(x, np.cal)).join('') || `<div class="hf-sub">${t('nothing_upcoming')}</div>`}</div>`;
     }
     const monthOpts = np.cal.map((m, i) => `<option value="${i + 1}" ${i + 1 === np.m ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
-    html += `<details class="hf-card hf-clock"><summary>🕰️ ${t('clock')} <b>&nbsp;${esc(fmtDate(np.cal, np.y, np.m, np.d))}</b>, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')}</summary>
+    html += `<details class="hf-card hf-clock"><summary><i class="fa-solid fa-clock"></i> ${t('clock')} <b>&nbsp;${esc(fmtDate(np.cal, np.y, np.m, np.d))}</b>, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')}</summary>
         <div class="hf-grid">
             <label>${t('day')}<input class="text_pole" type="number" id="hf_cd_d" value="${np.d}" min="1"></label>
             <label>${t('month')}<select class="text_pole" id="hf_cd_m">${monthOpts}</select></label>
@@ -809,9 +902,9 @@ function viewOverview() {
 function holidayCard(h, cal) {
     const mention = C().mentions[h.id];
     return `<details class="hf-hcard" style="--c:${TYPES[h.type]?.color}">
-        <summary><div class="hf-ico">${TYPES[h.type]?.icon || '✨'}</div>
+        <summary><div class="hf-ico">${hIcon(h)}</div>
             <div class="hf-grow"><div class="hf-name">${esc(h.name)} ${h.hidden ? `<span class="hf-badge">${t('hidden')}</span>` : ''}</div>
-            <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${h.year ? ' ' + esc(h.year) : ''} · ${srcLabel(h)}${mention ? ` · 💬 ×${mention.count}` : ''}</div></div>
+            <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${h.year ? ' ' + esc(h.year) : ''} · ${srcLabel(h)}${mention ? ` · <i class="fa-solid fa-comment"></i> ×${mention.count}` : ''}</div></div>
             ${typeChip(h.type)}</summary>
         <div class="hf-hbody">
             ${h.description ? `<p>${esc(h.description)}</p>` : ''}
@@ -846,8 +939,13 @@ function viewHolidays() {
                 <button class="hf-btn" data-hf="lore-scan" ${dis}>${t('scan_lore')}</button>
                 <button class="hf-btn" data-hf="add">${t('add_own')}</button>
             </div></div>
-        <div class="hf-filters">${filters.map((f) => `<button class="hf-pill ${ui.filter === f ? 'on' : ''}" data-hf="filter" data-f="${f}">${f === 'all' ? t('all') : TYPES[f].icon + ' ' + t('type_' + f)}</button>`).join('')}</div>
+        <div class="hf-filters">${filters.map((f) => `<button class="hf-pill ${ui.filter === f ? 'on' : ''}" data-hf="filter" data-f="${f}">${f === 'all' ? t('all') : '<i class="fa-solid ' + TYPES[f].fa + '"></i> ' + t('type_' + f)}</button>`).join('')}</div>
         ${list.map((h) => holidayCard(h, cal)).join('') || `<div class="hf-empty"><p>${t('nothing_here')}</p></div>`}`;
+}
+
+function iconPickerHtml(cur) {
+    const btn = (key, fa, label) => `<button type="button" class="hf-ip ${cur === key ? 'on' : ''}" data-hf="pick-icon" data-icon="${key}" title="${esc(label)}"><i class="fa-solid ${fa}"></i></button>`;
+    return btn('', 'fa-wand-magic-sparkles', t('icon_auto')) + ICON_WORDS.map((k) => btn(k, ICONS[k], k)).join('');
 }
 
 function viewEditor(cal) {
@@ -865,6 +963,8 @@ function viewEditor(cal) {
         <label>${t('tone')}<input class="text_pole" id="hf_e_tone" value="${esc(h.tone)}" placeholder="${esc(t('tone_ph'))}"></label>
         <label>${t('description')}<textarea class="text_pole" id="hf_e_desc" rows="3">${esc(h.description)}</textarea></label>
         <label>${t('traditions')}<textarea class="text_pole" id="hf_e_trad" rows="3">${esc(h.traditions)}</textarea></label>
+        <div class="hf-h">${t('icon')}</div>
+        <div class="hf-iconpick">${iconPickerHtml(ui.editIcon)}</div>
         <div class="hf-actions"><button class="hf-btn primary" data-hf="save-holiday">${t('save')}</button><button class="hf-btn" data-hf="cancel-edit">${t('cancel')}</button></div>
         <div class="hf-sub">${t('editor_note')}</div></div>`;
 }
@@ -877,12 +977,12 @@ function viewHistory() {
         .map((h) => ({ h, m: st.mentions[h.id], passed: isPassed(h) }))
         .sort((a, b) => (a.m?.last ?? 1e9) - (b.m?.last ?? 1e9));
     let html = `<div class="hf-actions"><button class="hf-btn primary" data-hf="scan">${t('scan_chat')}</button><button class="hf-btn" data-hf="chat-find" ${ui.busy ? 'disabled' : ''}>${t('find_chat')}</button></div><div class="hf-sub">${t('hist_note')}</div>`;
-    if (!items.length) return html + `<div class="hf-empty"><div class="hf-bigico">📜</div><p>${t('hist_empty')}</p></div>`;
+    if (!items.length) return html + `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-scroll"></i></div><p>${t('hist_empty')}</p></div>`;
     html += '<div class="hf-timeline">';
     for (const { h, m, passed } of items) {
         html += `<div class="hf-tl ${passed ? 'done' : ''}" style="--c:${TYPES[h.type]?.color}">
             <div class="hf-dot"></div>
-            <div class="hf-tl-body"><div class="hf-name">${TYPES[h.type]?.icon} ${esc(h.name)} <span class="hf-badge">${passed ? t('passed') : t('mentioned')}</span></div>
+            <div class="hf-tl-body"><div class="hf-name">${hIcon(h)} ${esc(h.name)} <span class="hf-badge">${passed ? t('passed') : t('mentioned')}</span></div>
             <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${m ? ` · ${t('msg')} #${m.first}${m.count > 1 ? `–#${m.last}` : ''} · ×${m.count}` : ''}</div>
             ${m?.snippet ? `<div class="hf-quote">…${esc(m.snippet)}…</div>` : ''}
             <label class="checkbox_label"><input type="checkbox" data-hf="celebrate" data-id="${h.id}" ${st.celebrated[h.id] ? 'checked' : ''}><span>${t('mark_cel')}</span></label></div></div>`;
@@ -938,15 +1038,25 @@ function viewSettings() {
             ${chk('toast', t('toast_opt'))}</div>`;
 }
 
-const TABS = [['overview', '🏠'], ['holidays', '📅'], ['history', '📜'], ['profiles', '🌍'], ['settings', '⚙️']];
+const TABS = [['overview', '<i class="fa-solid fa-house"></i>'], ['holidays', '<i class="fa-solid fa-calendar-days"></i>'], ['history', '<i class="fa-solid fa-scroll"></i>'], ['profiles', '<i class="fa-solid fa-earth-europe"></i>'], ['settings', '<i class="fa-solid fa-gear"></i>']];
 
 function renderBody() {
+    try {
+        renderBodyInner();
+    } catch (e) {
+        console.error('[Holiday Forge] render failed', e);
+        const body = document.querySelector('#hf-sheet .hf-body');
+        if (body) body.innerHTML = `<div class="hf-empty"><p>${esc(e?.message || e)}</p></div>`;
+    }
+}
+
+function renderBodyInner() {
     if (!ui.open) return;
     const body = document.querySelector('#hf-sheet .hf-body');
     if (!body) return;
     const scroll = body.scrollTop;
-    if (!hasChat()) {
-        body.innerHTML = `<div class="hf-empty"><div class="hf-bigico">💬</div><p>${t('open_chat')}</p></div>`;
+    if (!hasChat() || !C()) {
+        body.innerHTML = `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-comment"></i></div><p>${t('open_chat')}</p></div>`;
     } else {
         const views = { overview: viewOverview, holidays: viewHolidays, history: viewHistory, profiles: viewProfiles, settings: viewSettings };
         const banner = ui.busy ? `<div class="hf-busy"><span class="hf-spin"></span><span class="hf-grow">${t('busy')}</span><button class="hf-btn small" data-hf="cancel">${t('cancel')}</button></div>` : '';
@@ -976,9 +1086,9 @@ function renderStrip() {
     const list = upcoming();
     const today = list.find((x) => x.delta === 0);
     const next = list.find((x) => x.delta > 0);
-    if (today) el.innerHTML = `🎉 <b>${t('today')}:</b> ${esc(today.h.name)}`;
-    else if (next) el.innerHTML = `${TYPES[next.h.type]?.icon} <b>${esc(next.h.name)}</b> <span class="hf-cd-inline" data-serial="${next.serial}">${inlineCd(next.mins)}</span> <small>${esc(fmtMD(cal, next.h.month, next.h.day))}</small>`;
-    else el.textContent = '🎆 Holiday Forge';
+    if (today) el.innerHTML = `<i class="fa-solid fa-champagne-glasses"></i> <b>${t('today')}:</b> ${esc(today.h.name)}`;
+    else if (next) el.innerHTML = `${hIcon(next.h)} <b>${esc(next.h.name)}</b> <span class="hf-cd-inline" data-serial="${next.serial}">${inlineCd(next.mins)}</span> <small>${esc(fmtMD(cal, next.h.month, next.h.day))}</small>`;
+    else el.textContent = '<i class="fa-solid fa-calendar-days"></i> Holiday Forge';
 }
 
 /* ----------------------------------------------- tracker inside chat messages */
@@ -989,7 +1099,7 @@ function ringInner(mins) {
     const R = 15.5;
     const CIRC = 2 * Math.PI * R;
     const prog = mins <= 0 ? 1 : clamp(1 - days / 60, 0.05, 1);
-    const label = mins <= 0 ? '🎉' : days >= 1 ? `${days}` : `${hrs}${t('s_h')}`;
+    const label = mins <= 0 ? '<i class="fa-solid fa-champagne-glasses"></i>' : days >= 1 ? `${days}` : `${hrs}${t('s_h')}`;
     return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle class="hf-ring-bg" cx="20" cy="20" r="${R}"/><circle class="hf-ring-fg" cx="20" cy="20" r="${R}" stroke-dasharray="${(CIRC * prog).toFixed(1)} ${CIRC.toFixed(1)}" transform="rotate(-90 20 20)"/></svg><b>${label}</b>`;
 }
 
@@ -997,7 +1107,7 @@ function trackerHtml() {
     const { cal } = nowParts();
     const list = upcoming();
     if (!list.length) {
-        return `<div class="hf-tracker hf-tr-empty" data-hf-open="1"><span class="hf-tr-ico-big">🔨</span><span class="hf-tr-main"><span class="hf-tr-title">Holiday Forge</span><span class="hf-tr-sub">${esc(visible().length ? t('nothing_upcoming') : t('tr_empty') + ' · ' + t('tr_empty_hint'))}</span></span></div>`;
+        return `<div class="hf-tracker hf-tr-empty" data-hf-open="1"><span class="hf-tr-ico-big"><i class="fa-solid fa-calendar-days"></i></span><span class="hf-tr-main"><span class="hf-tr-title">Holiday Forge</span><span class="hf-tr-sub">${esc(visible().length ? t('nothing_upcoming') : t('tr_empty') + ' · ' + t('tr_empty_hint'))}</span></span></div>`;
     }
     const todays = list.filter((x) => x.delta === 0);
     const focus = todays[0] || list[0];
@@ -1006,11 +1116,11 @@ function trackerHtml() {
     const sub = focus.delta === 0
         ? `<b>${t('today')}</b> · ${esc(fmtMD(cal, h.month, h.day))}`
         : `<span class="hf-cd-inline hf-tr-cd" data-serial="${focus.serial}">${inlineCd(focus.mins)}</span> · ${esc(fmtMD(cal, h.month, h.day))}`;
-    const row = (x) => `<div class="hf-tr-item" style="--c:${TYPES[x.h.type]?.color}"><span class="hf-tr-ico">${TYPES[x.h.type]?.icon || '✨'}</span><span class="hf-tr-iname">${esc(x.h.name)}</span><span class="hf-tr-when">${x.delta === 0 ? t('today') : esc(fmtMD(cal, x.h.month, x.h.day)) + ' · ' + whenLabel(x.delta)}</span></div>`;
+    const row = (x) => `<div class="hf-tr-item" style="--c:${TYPES[x.h.type]?.color}"><span class="hf-tr-ico">${hIcon(x.h)}</span><span class="hf-tr-iname">${esc(x.h.name)}</span><span class="hf-tr-when">${x.delta === 0 ? t('today') : esc(fmtMD(cal, x.h.month, x.h.day)) + ' · ' + whenLabel(x.delta)}</span></div>`;
     return `<details class="hf-tracker" style="--c:${TYPES[h.type]?.color}" ${ui.trackerOpen ? 'open' : ''}>
         <summary>
             <span class="hf-ring" data-serial="${focus.serial}">${ringInner(focus.mins)}</span>
-            <span class="hf-tr-main"><span class="hf-tr-title">${TYPES[h.type]?.icon || '✨'} ${esc(h.name)}</span><span class="hf-tr-sub">${sub}</span></span>
+            <span class="hf-tr-main"><span class="hf-tr-title">${hIcon(h)} ${esc(h.name)}</span><span class="hf-tr-sub">${sub}</span></span>
             <span class="hf-tr-chev">▾</span>
         </summary>
         <div class="hf-tr-body">
@@ -1135,8 +1245,12 @@ const actions = {
     'lore-scan': () => runBusy(scanLorebook),
     'chat-find': () => runBusy(findInChat, 't_chat_none'),
     cancel: () => cancelBusy(),
-    add: () => { ui.editing = 'new'; renderBody(); },
-    edit: (el) => { ui.editing = el.dataset.id; renderBody(); },
+    add: () => { ui.editing = 'new'; ui.editIcon = ''; renderBody(); },
+    edit: (el) => { ui.editing = el.dataset.id; ui.editIcon = holidays().find((x) => x.id === el.dataset.id)?.icon || ''; renderBody(); },
+    'pick-icon': (el) => {
+        ui.editIcon = el.dataset.icon;
+        el.parentElement.querySelectorAll('.hf-ip').forEach((b) => b.classList.toggle('on', b === el));
+    },
     'cancel-edit': () => { ui.editing = null; renderBody(); },
     'save-holiday': () => {
         const cal = nowParts().cal;
@@ -1147,7 +1261,7 @@ const actions = {
         const yr = v('hf_e_year');
         const data = {
             name, month, day: dClamp(cal, month, v('hf_e_day')), year: yr === '' ? null : parseInt(yr, 10),
-            type: v('hf_e_type'), tone: v('hf_e_tone'), description: v('hf_e_desc'), traditions: v('hf_e_trad'),
+            type: v('hf_e_type'), tone: v('hf_e_tone'), icon: ui.editIcon || '', description: v('hf_e_desc'), traditions: v('hf_e_trad'),
             source: 'manual', hidden: false,
         };
         const st = C();
@@ -1197,7 +1311,7 @@ const actions = {
         const h = holidays().find((x) => x.id === el.dataset.id);
         if (!h) return;
         el.disabled = true;
-        el.textContent = t('thinking');
+        el.innerHTML = t('thinking');
         try { ui.ideas[h.id] = await ideasFor(h); } catch { window.toastr?.error(t('t_ideas_fail')); }
         renderBody();
     },
@@ -1257,8 +1371,8 @@ function buildPanel() {
     o.className = 'hf-hidden';
     o.innerHTML = `<div id="hf-sheet" role="dialog" aria-modal="true" aria-label="Holiday Forge">
         <div class="hf-grab"><span></span></div>
-        <div class="hf-head"><div class="hf-title">🔨 Holiday Forge</div><div class="hf-date"></div>
-            <button class="hf-x" data-hf="close" aria-label="Close">✕</button></div>
+        <div class="hf-head"><div class="hf-title"><i class="fa-solid fa-calendar-days"></i> Holiday Forge</div><div class="hf-date"></div>
+            <button class="hf-x" data-hf="close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
         <nav class="hf-tabs">${TABS.map(([k, i]) => `<button data-hf="tab" data-tab="${k}"><span>${i}</span>${t('tab_' + k)}</button>`).join('')}</nav>
         <div class="hf-body"></div></div>`;
     document.body.appendChild(o);
@@ -1267,7 +1381,7 @@ function buildPanel() {
         if (e.target === o) return closePanel();
         const el = e.target.closest('[data-hf]');
         if (!el || el.tagName === 'INPUT') return;
-        actions[el.dataset.hf]?.(el);
+        try { actions[el.dataset.hf]?.(el); } catch (err) { console.error('[Holiday Forge]', err); window.toastr?.error('Holiday Forge: ' + (err?.message || err)); }
     });
     o.addEventListener('change', (e) => {
         const el = e.target;
@@ -1312,6 +1426,15 @@ function buildPanel() {
 }
 
 function openPanel() {
+    try {
+        openPanelInner();
+    } catch (e) {
+        console.error('[Holiday Forge] open failed', e);
+        window.toastr?.error('Holiday Forge: ' + (e?.message || e));
+    }
+}
+
+function openPanelInner() {
     buildPanel();
     ui.open = true;
     document.getElementById('hf-overlay').classList.remove('hf-hidden');
@@ -1348,7 +1471,7 @@ function mountDrawer() {
             d.id = 'hf_drawer';
             d.className = 'extension_container';
             d.innerHTML = `<div class="inline-drawer">
-                <div class="inline-drawer-toggle inline-drawer-header"><b>🔨 Holiday Forge</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
+                <div class="inline-drawer-toggle inline-drawer-header"><b><i class="fa-solid fa-calendar-days"></i> Holiday Forge</b><div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>
                 <div class="inline-drawer-content">
                     <label class="checkbox_label"><input type="checkbox" id="hf_drawer_enabled"><span>${t('drawer_enabled')}</span></label>
                     <div class="menu_button" id="hf_drawer_open"><i class="fa-solid fa-calendar-days"></i> ${t('drawer_open')}</div>
@@ -1368,6 +1491,16 @@ function mountDrawer() {
         w.addEventListener('click', openPanel);
         menu.appendChild(w);
     }
+}
+
+function mountPoll() {
+    let n = 0;
+    const iv = setInterval(() => {
+        n++;
+        try { mountDrawer(); } catch (e) { console.warn('[Holiday Forge] mount', e); }
+        const done = document.getElementById('hf_drawer') && document.getElementById('hf_wand');
+        if (done || n >= 60) clearInterval(iv);
+    }, 500);
 }
 
 function syncDrawer() {
@@ -1407,7 +1540,7 @@ function tick() {
 jQuery(async () => {
     try {
         S();
-        mountDrawer();
+        mountPoll();
         buildPanel();
 
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui.open) closePanel(); });
@@ -1441,6 +1574,11 @@ jQuery(async () => {
 
         setInterval(tick, 5000);
         onChat();
+        if (S().seen !== '1.3.0') {
+            S().seen = '1.3.0';
+            saveSettingsDebounced();
+            setTimeout(() => window.toastr?.success('Holiday Forge 1.3 loaded'), 1500);
+        }
     } catch (e) {
         console.error('[Holiday Forge] init failed', e);
         window.toastr?.error('Holiday Forge failed to start: ' + (e?.message || e));

@@ -289,3 +289,22 @@ body.hf-lock { overscroll-behavior: contain; }
     animation: hf-rot 0.8s linear infinite;
 }
 @keyframes hf-rot { to { transform: rotate(360deg); } }
+
+/* ---------- Font Awesome icons ---------- */
+.hf-title i { margin-right: 8px; color: var(--hf-accent); }
+.hf-tabs button i { font-size: 0.95em; }
+.hf-ico i { font-size: 1em; color: color-mix(in srgb, var(--c, #999) 75%, var(--hf-body)); }
+.hf-chip i { font-size: 0.9em; }
+.hf-tr-ico i, .hf-tr-title i { color: color-mix(in srgb, var(--c, #999) 75%, var(--hf-body)); }
+.hf-tr-title i { margin-right: 4px; }
+.hf-tr-ico-big i { color: var(--hf-accent); }
+.hf-bigico i { color: var(--hf-accent); opacity: 0.85; }
+.hf-today-h i, .hf-tr-now i { color: var(--hf-accent); }
+.hf-pill i { margin-right: 2px; }
+
+.hf-iconpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 6px; margin: 4px 0 10px; }
+.hf-ip {
+    min-height: 46px; display: grid; place-items: center; cursor: pointer; font-size: 1.1em; color: var(--hf-body);
+    background: var(--hf-soft); border: 1px solid var(--hf-line); border-radius: 12px;
+}
+.hf-ip.on { background: color-mix(in srgb, var(--hf-accent) 28%, transparent); border-color: color-mix(in srgb, var(--hf-accent) 65%, transparent); }
