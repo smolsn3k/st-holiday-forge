@@ -1,4 +1,4 @@
-// Holiday Forge v1.6 — SillyTavern extension
+// Holiday Forge v1.7 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,7 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -189,6 +189,9 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        scan_date: 'Scan date from chat',
+        c_rpdate: (label, ev) => `The AI thinks the current story date is:\n\n${label}\n\nBased on: ${ev}\n\nSet the in-world date to this?`,
+        t_date_none: 'Could not find a date in the recent chat', t_date_set: (l) => `In-world date set: ${l}`,
         io_h: 'Import / Export', io_export: 'Export (downloads a JSON file):', io_holidays: 'Holidays', io_world_h: 'World + holidays', io_world: 'World only', io_all: 'All worlds',
         io_import: 'Import a file exported from Holiday Forge:', io_mode: 'If this chat already has holidays', io_merge: 'Merge (keep existing, add new)', io_replace: 'Replace them all',
         io_with_hol: 'Also import the holidays found in the file', io_file: 'Choose file…', io_paste: 'Paste JSON instead', io_import_paste: 'Import pasted JSON',
@@ -264,6 +267,9 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        scan_date: 'Определить дату из чата',
+        c_rpdate: (label, ev) => `ИИ считает, что сейчас в истории:\n\n${label}\n\nОснование: ${ev}\n\nУстановить эту дату в мире?`,
+        t_date_none: 'В последних сообщениях дата не найдена', t_date_set: (l) => `Дата в мире установлена: ${l}`,
         io_h: 'Импорт / Экспорт', io_export: 'Экспорт (скачивает JSON-файл):', io_holidays: 'Праздники', io_world_h: 'Мир + праздники', io_world: 'Только мир', io_all: 'Все миры',
         io_import: 'Импорт файла, экспортированного из Holiday Forge:', io_mode: 'Если в этом чате уже есть праздники', io_merge: 'Объединить (оставить текущие, добавить новые)', io_replace: 'Заменить все',
         io_with_hol: 'Также импортировать праздники из файла', io_file: 'Выбрать файл…', io_paste: 'Вставить JSON вместо файла', io_import_paste: 'Импортировать вставленный JSON',
@@ -965,6 +971,46 @@ If nothing is found, return [].`;
     return added;
 }
 
+function monthFromAny(cal, v) {
+    if (typeof v === 'number' || /^\d+$/.test(String(v).trim())) return mIdx(cal, v);
+    const q = String(v).trim().toLowerCase();
+    let i = cal.findIndex((c) => c.name.toLowerCase() === q || (c.gen && c.gen.toLowerCase() === q));
+    if (i < 0 && cal.length === 12) i = GREGORIAN.findIndex(([n], k) => n.toLowerCase() === q || GREG_RU[k][0].toLowerCase() === q || GREG_RU[k][1] === q);
+    return i >= 0 ? i + 1 : null;
+}
+
+/** Ask the model for the story's current date. Returns { label, minutes, evidence } or null. Hidden messages are included. */
+async function scanRpDate() {
+    const p = P();
+    const cal = calendar(p);
+    const list = chatList(getContext().chat);
+    if (!list.length) return null;
+    let text = '';
+    for (let i = list.length - 1; i >= 0 && text.length < 9000; i--) {
+        text = `${list[i].name}: ${String(list[i].mes).replace(/\s+/g, ' ').slice(0, 1200)}\n${text}`;
+    }
+    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
+Read this roleplay excerpt and work out the CURRENT in-story date at the END of the excerpt (the latest moment). Use explicit dates, weekdays, holidays, seasons and relative words such as "tomorrow" or "last night" that refer to dated events. If the story never gives or implies a date, answer {"found":false}.
+Calendar: ${p.calendarType === 'custom' ? 'custom' : 'Gregorian'}; months numbered ${cal.map((m, i) => `${i + 1}=${m.name}(${m.days}d)`).join(', ')}
+Return ONLY a JSON object, no markdown, no commentary:
+{"found":true,"day":<number>,"month":<number 1-${cal.length}>,"year":<number or null>,"hour":<0-23 or null>,"evidence":"short quote or reason"}
+Excerpt:
+${text}`;
+    const o = parseJsonList(await quiet(prompt, 500))[0];
+    if (!o || o.found === false) return null;
+    const month = monthFromAny(cal, o.month);
+    if (!month || !o.day) return null;
+    const np = nowParts();
+    const yr = o.year === null || o.year === undefined || Number.isNaN(Math.round(+o.year)) ? np.y : Math.round(+o.year);
+    const hr = o.hour === null || o.hour === undefined || Number.isNaN(Math.round(+o.hour)) ? np.h : clamp(Math.round(+o.hour), 0, 23);
+    const day = dClamp(cal, month, o.day);
+    return {
+        label: `${fmtDate(cal, yr, month, day)}, ${String(hr).padStart(2, '0')}:00`,
+        minutes: toDay(cal, yr, month, day) * 1440 + hr * 60 - Math.round(S().offset) * 1440,
+        evidence: String(o.evidence || '—').slice(0, 200),
+    };
+}
+
 async function ideasFor(h) {
     const p = P();
     const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
@@ -1069,6 +1115,7 @@ function viewOverview() {
             <button class="hf-btn" data-hf="advance" data-n="1">${t('plus1')}</button>
             <button class="hf-btn" data-hf="advance" data-n="7">${t('plus7')}</button>
         </div></details>`;
+    html += `<div class="hf-actions"><button class="hf-btn" data-hf="scan-date" ${ui.busy ? 'disabled' : ''}><i class="fa-solid fa-magnifying-glass-location"></i> ${t('scan_date')}</button></div>`;
     return html;
 }
 
@@ -1660,6 +1707,28 @@ const actions = {
         saveSettingsDebounced();
         const prompt = document.getElementById('hf_gen_prompt')?.value.trim();
         runBusy(() => generate(prompt));
+    },
+    'scan-date': async () => {
+        if (ui.busy) return;
+        const id = ++ui.runId;
+        runState = C();
+        ui.busy = true;
+        renderBody();
+        inj.text = ''; // the injected (wrong) date must not bias the model
+        applyInjection();
+        let res = null, err = null;
+        try { res = await withTimeout(scanRpDate(), 120000); } catch (e) { err = e; }
+        if (id !== ui.runId) return; // cancelled
+        ui.busy = false;
+        runState = null;
+        refreshAll();
+        if (err) { console.error('[Holiday Forge]', err); return window.toastr?.error(t('t_fail_d', err?.message || String(err))); }
+        if (!res) return window.toastr?.warning(t('t_date_none'));
+        if (!confirm(t('c_rpdate', res.label, res.evidence))) return;
+        storeClock(res.minutes);
+        refreshAll();
+        toastToday();
+        window.toastr?.success(t('t_date_set', res.label));
     },
     'lore-scan': () => runBusy(scanLorebook),
     'chat-find': () => runBusy(() => findInChat(false), 't_chat_none'),

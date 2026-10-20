@@ -19,6 +19,7 @@ Works on PC and mobile. Follows your active SillyTavern theme. English and Russi
 - **Find new in chat**: asks the AI to read the chat (last 40 messages or the whole chat, with a progress bar and cancel) and add holidays that are not in your list yet.
 - **Lorebook scan**: pull holidays out of your lorebooks, either the active ones or only the books you pick.
 - **Character awareness**: injects a short summary of today's and upcoming holidays into the prompt, with a token budget, depth, frequency and look-ahead window.
+- **Scan date from chat**: the AI reads the recent messages, works out the story's current date and sets the in-world clock after you confirm.
 - **Per-chat state**: holidays, in-world date and "celebrated" memory belong to the chat, so different RPs never clash.
 - **API profile chooser**: run generation through any Connection Manager profile.
 - **Import / export**: holidays, one world, one world with its holidays, or all worlds as JSON files. Paste-JSON import for phones.
@@ -83,7 +84,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 
 | Tab | What it does |
 | --- | --- |
-| Overview | Countdown to the next holiday, today's holidays, next 3, in-world date controls |
+| Overview | Countdown to the next holiday, today's holidays, next 3, in-world date controls and "Scan date from chat" |
 | Holidays | Generate, scan lorebook, add/edit/hide/delete, icon picker, export/import |
 | Calendar | Month grid, per-year "celebrated" marks, memory of past years |
 | History | Scan the chat, find new holidays in the chat, timeline of passed celebrations |
@@ -132,6 +133,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 - **«Найти новые в чате»** через ИИ: последние 40 сообщений или весь чат, с полосой прогресса и отменой.
 - **Скан лорбука**: активные лорбуки или только выбранные вами.
 - **Осведомлённость персонажей**: краткая сводка праздников попадает в промпт (лимит токенов, глубина, частота, горизонт).
+- **Определение даты из чата**: ИИ читает последние сообщения, находит текущую дату истории и (после вашего подтверждения) ставит её в календарь расширения.
 - **Состояние на чат**: праздники, дата в мире и память не пересекаются между разными чатами.
 - **Выбор API-профиля** (Connection Manager) для генерации.
 - **Импорт / экспорт** праздников и миров в JSON, в том числе вставкой текста.
