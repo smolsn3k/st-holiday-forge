@@ -348,3 +348,10 @@ body.hf-lock { overscroll-behavior: contain; }
 .hf-inline-host #hf-sheet { width: 100%; max-height: none; border-radius: 14px; animation: none; box-shadow: none; }
 .hf-inline-host .hf-grab { display: none; }
 .hf-inline-host .hf-body { overflow: visible; }
+
+/* ---------- fix: header, handle and tabs must never be squeezed by a long body ---------- */
+#hf-sheet > .hf-grab, #hf-sheet > .hf-head, #hf-sheet > .hf-tabs { flex: none; }
+.hf-tabs { min-height: 56px; align-items: center; }
+.hf-tabs button { flex: none; white-space: nowrap; }
+.hf-body { flex: 1 1 auto; min-height: 0; }
+.hf-lorelist { max-height: 220px; overflow-y: auto; margin: 4px 0 8px; padding: 4px 8px; border: 1px solid var(--hf-line); border-radius: 10px; background: var(--hf-soft); }

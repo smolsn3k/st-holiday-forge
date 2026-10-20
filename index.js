@@ -1,4 +1,4 @@
-// Holiday Forge v1.4 — SillyTavern extension
+// Holiday Forge v1.5 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,7 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -123,6 +123,9 @@ const DEFAULTS = {
     count: 8,
     strip: true,
     tracker: 'last',
+    topLayer: false,
+    loreMode: 'active',
+    loreBooks: [],
     trackerPos: 'top',
     toast: true,
     autoGenerate: false,
@@ -186,6 +189,8 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        lore_src: 'Lorebook source', lore_active: 'Active lorebooks (global, character, chat)', lore_selected: 'Only the lorebooks I pick',
+        lore_none: 'No lorebooks found', toplayer_opt: 'Always show the panel above everything (use if the panel is hidden)',
         t_added: (n) => `Added ${n} holiday${n > 1 ? 's' : ''}`, t_nothing: 'Nothing new was added',
         t_fail: 'Generation failed or the reply was not valid JSON. Try again.', t_scanned: 'Chat scanned',
         t_name: 'Give it a name', t_lore_none: 'No usable lorebook entries found', t_invalid: 'Invalid profile file',
@@ -255,6 +260,8 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        lore_src: 'Источник лорбука', lore_active: 'Активные лорбуки (глобальные, персонажа, чата)', lore_selected: 'Только выбранные мной лорбуки',
+        lore_none: 'Лорбуки не найдены', toplayer_opt: 'Всегда показывать панель поверх всего (если панель скрыта)',
         t_added: (n) => `Добавлено праздников: ${n}`, t_nothing: 'Ничего нового не добавлено',
         t_fail: 'Не удалось сгенерировать или ответ не в формате JSON. Попробуйте ещё раз.', t_scanned: 'Чат просканирован',
         t_name: 'Укажите название', t_lore_none: 'Подходящих записей лорбука не найдено', t_invalid: 'Неверный файл профиля',
@@ -287,7 +294,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
 const diagLog = [];
@@ -546,17 +553,20 @@ function nameMatchers(name) {
     });
 }
 
+// SillyTavern's /hide marks messages as is_system; they are still real story messages, so they must be scanned.
+const isMsg = (m) => !!(m && m.mes && !['command', 'assistant_note'].includes(m.extra?.type) && !m.extra?.isSmallSys);
+
 function scanChat(msgs) {
     const st = C();
     if (!st) return null;
     const all = msgs || getContext().chat || [];
-    const chat = all.filter((m) => m && !m.is_system && m.mes);
+    const chat = all.filter(isMsg);
     const mentions = {};
     for (const h of holidays()) {
         const res = nameMatchers(h.name);
         if (!res.length) continue;
         all.forEach((m, i) => {
-            if (!m || m.is_system || !m.mes) return;
+            if (!isMsg(m)) return;
             if (!res.every((re) => re.test(m.mes))) return;
             const rec = (mentions[h.id] ??= { first: i, last: i, count: 0, snippet: '' });
             rec.last = i;
@@ -666,15 +676,17 @@ const HOLIDAY_RE = /holiday|festival|feast|celebrat|ritual|ceremon|solstice|equi
 async function collectLore() {
     const ctx = getContext();
     const wi = await import('../../../world-info.js');
-    const names = new Set(wi.selected_world_info || []);
+    const active = new Set(wi.selected_world_info || []);
     const ch = ctx.characters?.[ctx.characterId];
     const linked = ch?.data?.extensions?.world;
-    if (linked) names.add(linked);
+    if (linked) active.add(linked);
     const chatBook = ctx.chatMetadata?.[wi.METADATA_KEY || 'world_info'];
-    if (chatBook) names.add(chatBook);
+    if (chatBook) active.add(chatBook);
     const file = ch?.avatar?.replace(/\.[^/.]+$/, '');
     const extra = wi.world_info?.charLore?.find((e) => e.name === file);
-    (extra?.extraBooks || []).forEach((n) => names.add(n));
+    (extra?.extraBooks || []).forEach((n) => active.add(n));
+    const picked = S().loreMode === 'selected';
+    const names = picked ? new Set(S().loreBooks || []) : active;
 
     const entries = [];
     for (const n of names) {
@@ -683,7 +695,7 @@ async function collectLore() {
             Object.values(data?.entries || {}).forEach((e) => { if (!e.disable) entries.push(e); });
         } catch (e) { console.warn('[Holiday Forge] lorebook load failed', n, e); }
     }
-    (ch?.data?.character_book?.entries || []).forEach((e) => { if (e.enabled !== false) entries.push({ comment: e.comment, key: e.keys, content: e.content }); });
+    if (!picked) (ch?.data?.character_book?.entries || []).forEach((e) => { if (e.enabled !== false) entries.push({ comment: e.comment, key: e.keys, content: e.content }); });
 
     const fmt = (e) => `${e.comment || (e.key || []).join(', ')}: ${String(e.content || '').replace(/\s+/g, ' ').trim()}`;
     let pool = entries.filter((e) => HOLIDAY_RE.test(`${e.comment || ''} ${(e.key || []).join(' ')} ${e.content || ''}`));
@@ -894,7 +906,7 @@ async function getFullChat() {
     return mem;
 }
 
-const chatList = (msgs) => (msgs || []).filter((m) => m && !m.is_system && m.mes);
+const chatList = (msgs) => (msgs || []).filter(isMsg);
 
 function chunkMessages(list, maxChars = 8000, perMsg = 1200) {
     const chunks = [];
@@ -978,6 +990,25 @@ function miniRow(x, cal) {
         <div class="hf-ico">${hIcon(h)}</div>
         <div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}</div></div>
         <div class="hf-when ${x.delta === 0 ? 'now' : ''}">${whenLabel(x.delta)}</div></div>`;
+}
+
+async function loadLoreNames() {
+    try {
+        const wi = await import('../../../world-info.js');
+        if (Array.isArray(wi.world_names)) ui.loreNames = [...wi.world_names];
+    } catch (e) { dlog('lore names: ' + (e?.message || e)); }
+    if (!ui.loreNames.length && Array.isArray(getContext().worldNames)) ui.loreNames = [...getContext().worldNames];
+    if (ui.open && ['holidays', 'settings'].includes(ui.tab) && !ui.editing) renderBody();
+}
+
+function loreSelect() {
+    const s = S();
+    const names = ui.loreNames || [];
+    const books = Array.isArray(s.loreBooks) ? s.loreBooks : [];
+    return `<label>${t('lore_src')}<select class="text_pole" data-set="loreMode">
+        <option value="active" ${s.loreMode !== 'selected' ? 'selected' : ''}>${t('lore_active')}</option>
+        <option value="selected" ${s.loreMode === 'selected' ? 'selected' : ''}>${t('lore_selected')}</option></select></label>
+        ${s.loreMode === 'selected' ? `<div class="hf-lorelist">${names.length ? names.map((n) => `<label class="checkbox_label"><input type="checkbox" data-lore="${esc(n)}" ${books.includes(n) ? 'checked' : ''}><span>${esc(n)}</span></label>`).join('') : `<div class="hf-sub">${t('lore_none')}</div>`}</div>` : ''}`;
 }
 
 function apiSelect() {
@@ -1065,6 +1096,7 @@ function viewHolidays() {
             <textarea class="text_pole" id="hf_gen_prompt" rows="2" placeholder="${esc(t('gen_ph'))}"></textarea>
             ${apiSelect()}
             <label class="checkbox_label"><input type="checkbox" data-set="useLore" ${s.useLore ? 'checked' : ''}><span>${t('use_lore')}</span></label>
+            ${loreSelect()}
             <div class="hf-actions">
                 <label class="hf-inline">${t('count')} <input class="text_pole hf-num" type="number" id="hf_gen_count" min="1" max="20" value="${s.count}"></label>
                 <button class="hf-btn primary" data-hf="generate" ${dis}>${ui.busy ? t('generating') : t('generate')}</button>
@@ -1238,6 +1270,7 @@ function viewSettings() {
             ${sel('style', t('style'), Object.keys(STYLE_PROMPTS).map((k) => [k, t('style_' + k)]))}
             ${num('count', t('per_gen'), 1, 20)}
             ${chk('useLore', t('use_lore'))}
+            ${loreSelect()}
             ${chk('autoGenerate', t('auto_gen'))}</div>
         <div class="hf-card"><div class="hf-h">${t('s_ai')}</div>
             ${chk('enabled', t('enabled'))}
@@ -1250,8 +1283,13 @@ function viewSettings() {
             ${sel('tracker', t('tracker_opt'), [['last', t('tr_last')], ['all', t('tr_all')], ['off', t('tr_off')]])}
             ${sel('trackerPos', t('tracker_pos'), [['top', t('tp_top')], ['bottom', t('tp_bottom')]])}
             ${chk('strip', t('strip_opt'))}
-            ${chk('toast', t('toast_opt'))}</div>
+            ${chk('toast', t('toast_opt'))}
+            ${chk('topLayer', t('toplayer_opt'))}</div>
         ${diagCard()}`;
+}
+
+function tabsHtml() {
+    return TABS.map(([k, i]) => `<button data-hf="tab" data-tab="${k}"><span>${i}</span>${t('tab_' + k)}</button>`).join('');
 }
 
 function busyBanner() {
@@ -1469,7 +1507,7 @@ function cancelBusy() {
 const actions = {
     open: () => openPanel(),
     close: () => closePanel(),
-    tab: (el) => { ui.tab = el.dataset.tab; ui.editing = null; renderBody(); },
+    tab: (el) => { ui.tab = el.dataset.tab; ui.editing = null; renderBody(); if (['holidays', 'settings'].includes(ui.tab)) loadLoreNames(); },
     goto: (el) => { ui.tab = el.dataset.tab; renderBody(); },
     filter: (el) => { ui.filter = el.dataset.f; renderBody(); },
     generate: () => {
@@ -1636,7 +1674,7 @@ function buildPanel() {
         <div class="hf-grab"><span></span></div>
         <div class="hf-head"><div class="hf-title"><i class="fa-solid fa-calendar-days"></i> Holiday Forge</div><div class="hf-date"></div>
             <button class="hf-x" data-hf="close" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
-        <nav class="hf-tabs">${TABS.map(([k, i]) => `<button data-hf="tab" data-tab="${k}"><span>${i}</span>${t('tab_' + k)}</button>`).join('')}</nav>
+        <nav class="hf-tabs">${tabsHtml()}</nav>
         <div class="hf-body"></div></div>`;
     document.body.appendChild(o);
 
@@ -1649,6 +1687,14 @@ function buildPanel() {
     });
     sh0.addEventListener('change', (e) => {
         const el = e.target;
+        if (el.dataset.lore !== undefined) {
+            const s = S();
+            const set = new Set(Array.isArray(s.loreBooks) ? s.loreBooks : []);
+            if (el.checked) set.add(el.dataset.lore); else set.delete(el.dataset.lore);
+            s.loreBooks = [...set];
+            saveSettingsDebounced();
+            return;
+        }
         if (el.dataset.hf === 'celebrate') return actions.celebrate(el);
         if (el.dataset.hf === 'celebrate-y') return actions['celebrate-y'](el);
         if (el.id === 'hf_profile_pick') { C().profileId = el.value; ui.editingProfile = null; saveChat(); return refreshAll(); }
@@ -1717,21 +1763,32 @@ function overlayVisible() {
     return !!el && sh.contains(el);
 }
 
-/** If something in SillyTavern's mobile layout covers the panel, move it to the browser's top layer. */
-function ensureVisible() {
-    if (!ui.open || ui.inline) return;
-    if (overlayVisible()) { dlog('panel visible'); return; }
-    dlog('panel NOT visible, trying top layer');
+function enterTopLayer() {
     const o = document.getElementById('hf-overlay');
     try {
-        if (o?.showPopover) {
+        if (o?.showPopover && !o.matches(':popover-open')) {
             o.setAttribute('popover', 'manual');
             o.showPopover();
         }
     } catch (e) { dlog('popover failed: ' + (e?.message || e)); }
+}
+
+/** If something in SillyTavern's layout covers the panel, move it to the browser's top layer (and remember that). */
+function ensureVisible() {
+    if (!ui.open || ui.inline) return;
+    if (overlayVisible()) { dlog('panel visible'); return; }
+    dlog('panel NOT visible, trying top layer');
+    enterTopLayer();
     setTimeout(() => {
-        if (ui.open && !overlayVisible()) { dlog('still hidden after top layer'); window.toastr?.warning(t('t_hidden')); }
-        else dlog('visible after top layer');
+        if (!ui.open) return;
+        if (overlayVisible()) {
+            S().topLayer = true;
+            saveSettingsDebounced();
+            dlog('visible after top layer; remembered');
+        } else {
+            dlog('still hidden after top layer');
+            window.toastr?.warning(t('t_hidden'));
+        }
     }, 300);
 }
 
@@ -1742,8 +1799,10 @@ function openPanelInner() {
     document.getElementById('hf-overlay').classList.remove('hf-hidden');
     document.body.classList.add('hf-lock');
     dlog('open panel');
+    if (S().topLayer) enterTopLayer();
     if (hasChat() && C()) { ensureClock(); scanChat(); }
     renderBody();
+    loadLoreNames();
     setTimeout(ensureVisible, 300);
 }
 
@@ -1782,13 +1841,15 @@ function closePanel() {
 }
 
 function relocalize() {
-    const wasOpen = ui.open;
-    document.getElementById('hf-overlay')?.remove();
+    // keep the panel element (it may live in the browser's top layer); only refresh the texts
+    const wasInline = ui.inline;
+    if (wasInline) restoreSheet();
     document.getElementById('hf_drawer')?.remove();
     document.getElementById('hf_wand')?.remove();
-    buildPanel();
+    const nav = document.querySelector('#hf-sheet .hf-tabs');
+    if (nav) nav.innerHTML = tabsHtml();
     mountDrawer();
-    if (wasOpen) document.getElementById('hf-overlay').classList.remove('hf-hidden');
+    if (wasInline) openInline();
     refreshAll();
 }
 
@@ -1825,7 +1886,7 @@ function mountDrawer() {
         w.id = 'hf_wand';
         w.className = 'list-group-item flex-container flexGap5';
         w.innerHTML = '<div class="fa-solid fa-calendar-days extensionsMenuExtensionButton"></div><span>Holiday Forge</span>';
-        w.addEventListener('click', openPanel);
+        w.dataset.hfWand = '1';
         menu.appendChild(w);
     }
 }
@@ -1881,7 +1942,7 @@ async function collectDiag(withTest) {
     add('UA', safe(() => navigator.userAgent));
     add('viewport', safe(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, vv: visualViewport ? [Math.round(visualViewport.width), Math.round(visualViewport.height)] : null })));
     add('css', safe(() => ({ colorMix: CSS.supports('color', 'color-mix(in srgb, red 50%, blue)'), dvh: CSS.supports('height', '100dvh'), inset: CSS.supports('inset', '0'), backdrop: CSS.supports('backdrop-filter', 'blur(2px)'), popover: 'popover' in HTMLElement.prototype, dialog: typeof HTMLDialogElement })));
-    add('ctx', safe(() => ({ keys: Object.keys(ctx).length, chatId: !!chatIdNow(), chatLen: (ctx.chat || []).length, chatMetadata: !!ctx.chatMetadata, characterId: ctx.characterId, groupId: !!ctx.groupId, eventTypes: !!(ctx.eventTypes || ctx.event_types), connMgr: !!ctx.ConnectionManagerRequestService, profiles: profiles().length, quiet: typeof ctx.generateQuietPrompt, setPrompt: typeof ctx.setExtensionPrompt, saveMeta: typeof ctx.saveMetadataDebounced, extSettings: !!ctx.extensionSettings, headers: typeof ctx.getRequestHeaders })));
+    add('ctx', safe(() => ({ keys: Object.keys(ctx).length, chatId: !!chatIdNow(), chatLen: (ctx.chat || []).length, chatHidden: (ctx.chat || []).filter((m) => m?.is_system).length, chatCounted: (ctx.chat || []).filter(isMsg).length, chatMetadata: !!ctx.chatMetadata, characterId: ctx.characterId, groupId: !!ctx.groupId, eventTypes: !!(ctx.eventTypes || ctx.event_types), connMgr: !!ctx.ConnectionManagerRequestService, profiles: profiles().length, quiet: typeof ctx.generateQuietPrompt, setPrompt: typeof ctx.setExtensionPrompt, saveMeta: typeof ctx.saveMetadataDebounced, extSettings: !!ctx.extensionSettings, headers: typeof ctx.getRequestHeaders })));
     add('settings', safe(() => { const s = { ...S() }; s.profiles = Object.keys(s.profiles).length; return s; }));
     add('state', safe(() => { const st = C(); return st ? { holidays: st.holidays.length, mentions: Object.keys(st.mentions).length, celebrated: Object.keys(st.celebrated).length, clock: st.clock } : null; }));
     add('ui', safe(() => ({ tab: ui.tab, open: ui.open, busy: ui.busy, inline: ui.inline })));
@@ -1974,7 +2035,8 @@ jQuery(async () => {
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui.open) closePanel(); });
         document.addEventListener('toggle', (e) => { if (e.target?.classList?.contains('hf-tracker')) ui.trackerOpen = e.target.open; }, true);
         document.addEventListener('click', (e) => {
-            if (e.target.closest?.('[data-hf-diag]')) runDiag();
+            if (e.target.closest?.('[data-hf-wand]')) { dlog('wand click'); setTimeout(openPanel, 80); }
+            else if (e.target.closest?.('[data-hf-diag]')) runDiag();
             else if (e.target.closest?.('[data-hf-open]')) openPanel();
         });
 
