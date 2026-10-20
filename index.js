@@ -1,4 +1,4 @@
-// Holiday Forge v1.3 — SillyTavern extension
+// Holiday Forge v1.4 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,6 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
+const VERSION = '1.4.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -172,6 +173,19 @@ const L = {
         s_lang: 'Language', lang_ui: 'Interface language', lang_auto: 'Auto', gen_lang: 'Generated text language', gl_chat: 'Match the chat',
         open_chat: 'Open a chat to use Holiday Forge.', drawer_enabled: 'Enabled', drawer_open: 'Open Holiday Forge',
         tr_closest: 'Closest holidays', tr_open: 'Open Holiday Forge', icon: 'Icon', icon_auto: 'Auto',
+        tab_calendar: 'Calendar', cal_today: 'Today', cal_add: 'Add holiday on this day', cal_none_day: 'No holidays on this day.',
+        cal_celebrated: (y) => `Celebrated in year ${y}`, cal_memory: 'Memory of past years',
+        cal_memory_empty: 'Nothing remembered yet. Tick “Celebrated” on a day in the calendar (or in History) and it is kept here and repeats next year.',
+        repeat_opt: 'Repeats every year', one_off: 'one-off',
+        hist_help: '“Scan whole chat” is a free, instant text search for holidays that are already in your list. “Find new” asks the AI to read the chat and add holidays that are not in the list yet.',
+        scan_whole: 'Scan whole chat', scanning: 'Scanning…', find_recent: 'Find new (last 40 messages)', find_all: 'Find new in whole chat…',
+        c_whole: (m, n) => `Scan the whole chat with the AI?\n\n${m} messages will be sent to your model in ${n} requests. This can take a long time and use many tokens. You can cancel at any time; holidays found so far are kept.`,
+        diag_btn: 'Diagnostics', diag_hint: 'Runs a self-test and copies technical info that you can paste to the developer.', diag_run: 'Run & copy', diag_copy: 'Copy',
+        diag_copied: 'Diagnostics copied', diag_ready: 'Diagnostics ready: select and copy the text',
+        inline_btn: 'Open here (inline)',
+        t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
+        src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
+        tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
         t_added: (n) => `Added ${n} holiday${n > 1 ? 's' : ''}`, t_nothing: 'Nothing new was added',
         t_fail: 'Generation failed or the reply was not valid JSON. Try again.', t_scanned: 'Chat scanned',
         t_name: 'Give it a name', t_lore_none: 'No usable lorebook entries found', t_invalid: 'Invalid profile file',
@@ -228,6 +242,19 @@ const L = {
         s_lang: 'Язык', lang_ui: 'Язык интерфейса', lang_auto: 'Авто', gen_lang: 'Язык сгенерированного текста', gl_chat: 'Как в чате',
         open_chat: 'Откройте чат, чтобы пользоваться Holiday Forge.', drawer_enabled: 'Включено', drawer_open: 'Открыть Holiday Forge',
         tr_closest: 'Ближайшие праздники', tr_open: 'Открыть Holiday Forge', icon: 'Значок', icon_auto: 'Авто',
+        tab_calendar: 'Календарь', cal_today: 'Сегодня', cal_add: 'Добавить праздник на этот день', cal_none_day: 'В этот день праздников нет.',
+        cal_celebrated: (y) => `Отпразднован в ${y} году`, cal_memory: 'Память о прошлых годах',
+        cal_memory_empty: 'Пока ничего не запомнено. Отметьте «Отпразднован» в календаре (или в Истории) — это сохранится здесь и повторится в следующем году.',
+        repeat_opt: 'Повторяется каждый год', one_off: 'разовый',
+        hist_help: '«Скан всего чата» — бесплатный мгновенный текстовый поиск праздников, которые уже есть в списке. «Найти новые» просит ИИ прочитать чат и добавить праздники, которых в списке ещё нет.',
+        scan_whole: 'Скан всего чата', scanning: 'Сканирую…', find_recent: 'Найти новые (последние 40 сообщений)', find_all: 'Найти новые во всём чате…',
+        c_whole: (m, n) => `Просканировать весь чат через ИИ?\n\nСообщений: ${m}, они уйдут вашей модели в ${n} запросах. Это может занять много времени и токенов. Можно отменить в любой момент — уже найденные праздники сохранятся.`,
+        diag_btn: 'Диагностика', diag_hint: 'Запускает самопроверку и копирует технические данные, которые можно отправить разработчику.', diag_run: 'Запустить и скопировать', diag_copy: 'Копировать',
+        diag_copied: 'Диагностика скопирована', diag_ready: 'Диагностика готова: выделите и скопируйте текст',
+        inline_btn: 'Открыть здесь (во вкладке)',
+        t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
+        src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
+        tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
         t_added: (n) => `Добавлено праздников: ${n}`, t_nothing: 'Ничего нового не добавлено',
         t_fail: 'Не удалось сгенерировать или ответ не в формате JSON. Попробуйте ещё раз.', t_scanned: 'Чат просканирован',
         t_name: 'Укажите название', t_lore_none: 'Подходящих записей лорбука не найдено', t_invalid: 'Неверный файл профиля',
@@ -260,9 +287,19 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '' };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
+const diagLog = [];
+const dlog = (m) => { diagLog.push(`${new Date().toISOString().slice(11, 19)} ${m}`); if (diagLog.length > 60) diagLog.shift(); };
+window.addEventListener?.('error', (e) => {
+    const f = String(e.filename || '');
+    if (/holiday/i.test(f) || /holiday forge/i.test(String(e.message))) dlog(`ERR ${e.message} @${f.split('/').slice(-2).join('/')}:${e.lineno}`);
+});
+window.addEventListener?.('unhandledrejection', (e) => {
+    const m = String(e.reason?.stack || e.reason || '');
+    if (/holiday/i.test(m)) dlog('REJ ' + m.slice(0, 200));
+});
 let scanTimer = null;
 let obsTimer = null;
 
@@ -443,16 +480,40 @@ function occurrence(cal, h, nowDay) {
     return s;
 }
 
-function upcoming() {
-    const { total, day } = nowParts();
-    const { cal } = nowParts();
+const hasFixedYear = (h) => h.year !== null && h.year !== undefined && h.year !== '';
+
+function celebratedIn(h, y) {
+    const st = C();
+    let c = st.celebrated[h.id];
+    if (c === true) { c = { [y]: true }; st.celebrated[h.id] = c; } // legacy boolean -> per-year memory
+    return !!(c && typeof c === 'object' && c[y]);
+}
+
+function setCelebrated(id, y, val) {
+    const st = C();
+    let c = st.celebrated[id];
+    if (!c || typeof c !== 'object') c = {};
+    c[y] = !!val; // explicit false = "user unticked it", so auto-marking will not bring it back
+    st.celebrated[id] = c;
+}
+
+/** Upcoming holidays. A holiday already marked as passed/celebrated this year is not counted down to again until the next year starts. */
+function upcoming(opts = {}) {
+    const { cal, total, day, y } = nowParts();
     return visible()
         .map((h) => {
             const serial = occurrence(cal, h, day);
-            return { h, serial, delta: serial - day, mins: serial * 1440 - total };
+            return { h, serial, delta: serial - day, mins: serial * 1440 - total, year: fromDay(cal, serial).y };
         })
         .filter((x) => x.delta >= 0)
+        .filter((x) => opts.all || !celebratedIn(x.h, x.year))
+        .filter((x) => opts.all || !(x.year > y && isPassed(x.h)))
         .sort((a, b) => a.serial - b.serial);
+}
+
+function nextYearHint() {
+    const n = upcoming({ all: true })[0];
+    return n ? `${t('tr_none_left')} ${t('tr_next_year', n.h.name, n.delta)}` : t('tr_none_left');
 }
 
 function mergeGenerated(list) {
@@ -485,11 +546,11 @@ function nameMatchers(name) {
     });
 }
 
-function scanChat() {
+function scanChat(msgs) {
     const st = C();
     if (!st) return null;
-    const chat = (getContext().chat || []).filter((m) => m && !m.is_system && m.mes);
-    const all = getContext().chat || [];
+    const all = msgs || getContext().chat || [];
+    const chat = all.filter((m) => m && !m.is_system && m.mes);
     const mentions = {};
     for (const h of holidays()) {
         const res = nameMatchers(h.name);
@@ -506,6 +567,7 @@ function scanChat() {
         });
     }
     st.mentions = mentions;
+    autoMarkPassed();
     saveChat();
     return { holidays: holidays().length, found: Object.keys(mentions).length, messages: chat.length };
 }
@@ -517,11 +579,26 @@ function scheduleScan() {
 
 function isPassed(h) {
     const st = C();
-    if (st.celebrated[h.id]) return true;
-    if (!st.mentions[h.id]) return false;
     const { cal, day, y } = nowParts();
-    if (h.year !== null && h.year !== undefined && h.year !== '') return toDay(cal, +h.year, h.month, h.day) < day;
+    if (celebratedIn(h, y)) return true;
+    const c = st.celebrated[h.id];
+    if (c && typeof c === 'object' && c[y] === false) return false;
+    if (!st.mentions[h.id]) return false;
+    if (hasFixedYear(h)) return toDay(cal, +h.year, h.month, h.day) < day;
     return toDay(cal, y, h.month, h.day) < day;
+}
+
+/** Freeze "mentioned and date passed" into the per-year memory so it survives the year rollover. */
+function autoMarkPassed() {
+    const st = C();
+    const { cal, day, y } = nowParts();
+    for (const h of holidays()) {
+        if (!st.mentions[h.id]) continue;
+        const c = st.celebrated[h.id];
+        if (c && typeof c === 'object' && c[y] !== undefined) continue;
+        const date = hasFixedYear(h) ? toDay(cal, +h.year, h.month, h.day) : toDay(cal, y, h.month, h.day);
+        if (date < day) setCelebrated(h.id, hasFixedYear(h) ? +h.year : y, true);
+    }
 }
 
 /* -------------------------------------------------------------- injection */
@@ -735,6 +812,7 @@ function normalize(list, cal, source) {
                 month,
                 day: dClamp(cal, month, x.day),
                 year: null,
+                repeat: true,
                 type: TYPES[x.type] ? x.type : 'cultural',
                 description: String(x.description || '').trim(),
                 traditions: String(x.traditions || '').trim(),
@@ -791,24 +869,80 @@ If nothing is found, return [].`;
     return mergeGenerated(normalize(parseJsonList(raw), cal, 'lorebook'));
 }
 
-async function findInChat() {
+/** The whole chat, even if the in-memory list only holds part of it: ask the server for the full file, fall back to memory. */
+async function getFullChat() {
+    const ctx = getContext();
+    const mem = ctx.chat || [];
+    try {
+        const id = chatIdNow();
+        const ch = ctx.characters?.[ctx.characterId];
+        let url = null, body = null;
+        if (id && ctx.groupId) { url = '/api/chats/group/get'; body = { id }; }
+        else if (id && ch) { url = '/api/chats/get'; body = { ch_name: ch.name, file_name: String(id).replace(/\.jsonl$/, ''), avatar_url: ch.avatar }; }
+        if (url && ctx.getRequestHeaders) {
+            const r = await fetch(url, { method: 'POST', headers: ctx.getRequestHeaders(), body: JSON.stringify(body) });
+            if (r.ok) {
+                const data = await r.json();
+                if (Array.isArray(data)) {
+                    const msgs = data.filter((m) => m && !m.chat_metadata && m.mes !== undefined);
+                    dlog(`full chat: server ${msgs.length}, memory ${mem.length}`);
+                    if (msgs.length > mem.length) return msgs;
+                }
+            } else dlog(`full chat fetch HTTP ${r.status}`);
+        }
+    } catch (e) { dlog('full chat fetch failed: ' + (e?.message || e)); }
+    return mem;
+}
+
+const chatList = (msgs) => (msgs || []).filter((m) => m && !m.is_system && m.mes);
+
+function chunkMessages(list, maxChars = 8000, perMsg = 1200) {
+    const chunks = [];
+    let cur = [];
+    let len = 0;
+    for (const m of list) {
+        const line = `${m.name}: ${String(m.mes).replace(/\s+/g, ' ').slice(0, perMsg)}`;
+        if (len + line.length > maxChars && cur.length) { chunks.push(cur.join('\n')); cur = []; len = 0; }
+        cur.push(line);
+        len += line.length + 1;
+    }
+    if (cur.length) chunks.push(cur.join('\n'));
+    return chunks;
+}
+
+async function findInChat(whole, msgs) {
     const p = P();
     const cal = calendar(p);
-    const msgs = (getContext().chat || []).filter((m) => m && !m.is_system && m.mes).slice(-40);
-    if (!msgs.length) return -1;
-    const text = msgs.map((m) => `${m.name}: ${String(m.mes).slice(0, 700)}`).join('\n').slice(0, 9000);
-    const existing = holidays().map((h) => h.name).join('; ') || 'none';
-    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
-Read the roleplay excerpt below. List every holiday, festival or celebration that the characters mention, plan or celebrate. Use dates from the text if given, otherwise pick a fitting date for the calendar.
+    const list = chatList(msgs || getContext().chat);
+    if (!list.length) return -1;
+    const chunks = chunkMessages(whole ? list : list.slice(-40));
+    const run = ui.runId;
+    let added = 0, failed = 0;
+    for (let i = 0; i < chunks.length; i++) {
+        if (ui.runId !== run) break; // cancelled
+        ui.progress = { done: i, total: chunks.length };
+        updateProgress();
+        const existing = holidays().map((h) => h.name).join('; ') || 'none';
+        const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
+Read this roleplay excerpt${chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length} of a longer chat)` : ''}. List every holiday, festival or celebration that the characters mention, plan or celebrate. Use dates from the text if given, otherwise pick a fitting date for the calendar.
 World profile:
 ${profileBlock(p, cal)}
 Already existing (skip these): ${existing}
 Excerpt:
-${text}
+${chunks[i]}
 
 ${JSON_SHAPE(cal)}
 If nothing is found, return [].`;
-    return mergeGenerated(normalize(parseJsonList(await quiet(prompt)), cal, 'generated'));
+        try {
+            added += mergeGenerated(normalize(parseJsonList(await quiet(prompt)), cal, 'chat'));
+        } catch (e) {
+            failed++;
+            dlog(`chunk ${i + 1} failed: ${e?.message || e}`);
+            if (failed >= 3 && added === 0 && failed === i + 1) throw e;
+        }
+    }
+    ui.progress = null;
+    return added;
 }
 
 async function ideasFor(h) {
@@ -881,7 +1015,7 @@ function viewOverview() {
                 <button class="hf-btn small" data-hf="ideas" data-id="${next.h.id}">${t('scene_ideas')}</button>
                 <div class="hf-ideas">${esc(ui.ideas[next.h.id] || '')}</div></div>`;
         }
-        html += `<div class="hf-h">${t('next3')}</div><div class="hf-card">${list.slice(0, 3).map((x) => miniRow(x, np.cal)).join('') || `<div class="hf-sub">${t('nothing_upcoming')}</div>`}</div>`;
+        html += `<div class="hf-h">${t('next3')}</div><div class="hf-card">${list.slice(0, 3).map((x) => miniRow(x, np.cal)).join('') || `<div class="hf-sub">${esc(nextYearHint())}</div>`}</div>`;
     }
     const monthOpts = np.cal.map((m, i) => `<option value="${i + 1}" ${i + 1 === np.m ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
     html += `<details class="hf-card hf-clock"><summary><i class="fa-solid fa-clock"></i> ${t('clock')} <b>&nbsp;${esc(fmtDate(np.cal, np.y, np.m, np.d))}</b>, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')}</summary>
@@ -904,7 +1038,7 @@ function holidayCard(h, cal) {
     return `<details class="hf-hcard" style="--c:${TYPES[h.type]?.color}">
         <summary><div class="hf-ico">${hIcon(h)}</div>
             <div class="hf-grow"><div class="hf-name">${esc(h.name)} ${h.hidden ? `<span class="hf-badge">${t('hidden')}</span>` : ''}</div>
-            <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${h.year ? ' ' + esc(h.year) : ''} · ${srcLabel(h)}${mention ? ` · <i class="fa-solid fa-comment"></i> ×${mention.count}` : ''}</div></div>
+            <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${h.year ? ' ' + esc(h.year) : ''} · ${srcLabel(h)}${h.repeat === false ? ' · ' + t('one_off') : ''}${mention ? ` · <i class="fa-solid fa-comment"></i> ×${mention.count}` : ''}</div></div>
             ${typeChip(h.type)}</summary>
         <div class="hf-hbody">
             ${h.description ? `<p>${esc(h.description)}</p>` : ''}
@@ -950,7 +1084,7 @@ function iconPickerHtml(cur) {
 
 function viewEditor(cal) {
     const h = ui.editing === 'new'
-        ? { name: '', month: 1, day: 1, year: '', type: 'cultural', description: '', traditions: '', tone: '' }
+        ? { name: '', month: 1, day: 1, year: '', type: 'cultural', description: '', traditions: '', tone: '', repeat: true, ...(ui.editDraft || {}) }
         : holidays().find((x) => x.id === ui.editing) || {};
     return `<div class="hf-card"><div class="hf-h">${ui.editing === 'new' ? t('new_holiday') : t('edit_holiday')}</div>
         <label>${t('name')}<input class="text_pole" id="hf_e_name" value="${esc(h.name)}"></label>
@@ -963,10 +1097,82 @@ function viewEditor(cal) {
         <label>${t('tone')}<input class="text_pole" id="hf_e_tone" value="${esc(h.tone)}" placeholder="${esc(t('tone_ph'))}"></label>
         <label>${t('description')}<textarea class="text_pole" id="hf_e_desc" rows="3">${esc(h.description)}</textarea></label>
         <label>${t('traditions')}<textarea class="text_pole" id="hf_e_trad" rows="3">${esc(h.traditions)}</textarea></label>
+        <label class="checkbox_label"><input type="checkbox" id="hf_e_repeat" ${h.repeat !== false ? 'checked' : ''}><span>${t('repeat_opt')}</span></label>
         <div class="hf-h">${t('icon')}</div>
         <div class="hf-iconpick">${iconPickerHtml(ui.editIcon)}</div>
         <div class="hf-actions"><button class="hf-btn primary" data-hf="save-holiday">${t('save')}</button><button class="hf-btn" data-hf="cancel-edit">${t('cancel')}</button></div>
         <div class="hf-sub">${t('editor_note')}</div></div>`;
+}
+
+function weekdayNames() {
+    try {
+        const f = new Intl.DateTimeFormat(lang(), { weekday: 'short', timeZone: 'UTC' });
+        return [0, 1, 2, 3, 4, 5, 6].map((i) => f.format(new Date(Date.UTC(2024, 0, 1 + i)))); // 2024-01-01 is a Monday
+    } catch { return ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']; }
+}
+
+function holidaysOn(cal, y, m, d) {
+    return visible().filter((h) => mIdx(cal, h.month) === m && dClamp(cal, h.month, h.day) === d && (!hasFixedYear(h) || +h.year === y));
+}
+
+function calStep(dir) {
+    const cal = nowParts().cal;
+    let m = ui.calM + dir;
+    let y = ui.calY;
+    if (m < 1) { m = cal.length; y--; } else if (m > cal.length) { m = 1; y++; }
+    ui.calM = m; ui.calY = y; ui.calSel = null;
+    renderBody();
+}
+
+function viewCalendar() {
+    const np = nowParts();
+    const cal = np.cal;
+    const st = C();
+    if (ui.calY === null) { ui.calY = np.y; ui.calM = np.m; }
+    ui.calM = mIdx(cal, ui.calM);
+    const y = ui.calY, m = ui.calM, nd = cal[m - 1].days;
+    let off = 0, heads = '';
+    if (P().calendarType !== 'custom') {
+        const dt = new Date(Date.UTC(2000, m - 1, 1));
+        dt.setUTCFullYear(y);
+        off = (dt.getUTCDay() + 6) % 7;
+        heads = weekdayNames().map((w) => `<div class="hf-wd">${esc(w)}</div>`).join('');
+    }
+    let cells = '';
+    for (let i = 0; i < off; i++) cells += '<div class="hf-day empty"></div>';
+    for (let d = 1; d <= nd; d++) {
+        const hs = holidaysOn(cal, y, m, d);
+        const isToday = y === np.y && m === np.m && d === np.d;
+        const past = y < np.y || (y === np.y && (m < np.m || (m === np.m && d < np.d)));
+        const marks = hs.slice(0, 3).map((h) => `<i class="fa-solid ${holidayIcon(h)} ${celebratedIn(h, y) ? 'done' : ''}" style="--c:${TYPES[h.type]?.color}"></i>`).join('');
+        cells += `<button class="hf-day ${isToday ? 'today' : ''} ${past ? 'past' : ''} ${ui.calSel === d ? 'sel' : ''}" data-hf="cal-day" data-d="${d}"><span class="hf-dn">${d}</span><span class="hf-dm">${marks}${hs.length > 3 ? `<small>+${hs.length - 3}</small>` : ''}</span></button>`;
+    }
+    let html = `<div class="hf-calhead">
+        <button class="hf-btn small" data-hf="cal-yprev" aria-label="-1 year"><i class="fa-solid fa-angles-left"></i></button>
+        <button class="hf-btn small" data-hf="cal-prev" aria-label="-1 month"><i class="fa-solid fa-chevron-left"></i></button>
+        <div class="hf-caltitle">${esc(cal[m - 1].name)} ${y}</div>
+        <button class="hf-btn small" data-hf="cal-next" aria-label="+1 month"><i class="fa-solid fa-chevron-right"></i></button>
+        <button class="hf-btn small" data-hf="cal-ynext" aria-label="+1 year"><i class="fa-solid fa-angles-right"></i></button></div>
+        <div class="hf-calgrid">${heads}${cells}</div>
+        <div class="hf-actions"><button class="hf-btn small" data-hf="cal-today"><i class="fa-solid fa-crosshairs"></i> ${t('cal_today')}</button></div>`;
+
+    if (ui.calSel) {
+        const hs = holidaysOn(cal, y, m, ui.calSel);
+        html += `<div class="hf-card"><div class="hf-h">${esc(fmtDate(cal, y, m, ui.calSel))}</div>`;
+        html += hs.length ? hs.map((h) => `<div class="hf-calitem" style="--c:${TYPES[h.type]?.color}">
+            <div class="hf-row"><div class="hf-ico">${hIcon(h)}</div><div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(h.description)}</div></div>${typeChip(h.type)}</div>
+            <label class="checkbox_label"><input type="checkbox" data-hf="celebrate-y" data-id="${h.id}" data-y="${y}" ${celebratedIn(h, y) ? 'checked' : ''}><span>${t('cal_celebrated', y)}</span></label>
+            <button class="hf-btn small" data-hf="edit" data-id="${h.id}">${t('edit')}</button></div>`).join('') : `<div class="hf-sub">${t('cal_none_day')}</div>`;
+        html += `<div class="hf-actions"><button class="hf-btn small" data-hf="cal-add"><i class="fa-solid fa-plus"></i> ${t('cal_add')}</button></div></div>`;
+    }
+
+    const mem = visible().map((h) => {
+        const c = st.celebrated[h.id];
+        const ys = c && typeof c === 'object' ? Object.keys(c).filter((k) => c[k]).map(Number).sort((a, b) => a - b) : [];
+        return { h, ys };
+    }).filter((x) => x.ys.length);
+    html += `<div class="hf-h">${t('cal_memory')}</div><div class="hf-card">${mem.length ? mem.map(({ h, ys }) => `<div class="hf-row" style="--c:${TYPES[h.type]?.color}"><div class="hf-ico">${hIcon(h)}</div><div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))} · ${ys.join(', ')}</div></div></div>`).join('') : `<div class="hf-sub">${t('cal_memory_empty')}</div>`}</div>`;
+    return html;
 }
 
 function viewHistory() {
@@ -976,7 +1182,10 @@ function viewHistory() {
         .filter((h) => isPassed(h) || st.mentions[h.id])
         .map((h) => ({ h, m: st.mentions[h.id], passed: isPassed(h) }))
         .sort((a, b) => (a.m?.last ?? 1e9) - (b.m?.last ?? 1e9));
-    let html = `<div class="hf-actions"><button class="hf-btn primary" data-hf="scan">${t('scan_chat')}</button><button class="hf-btn" data-hf="chat-find" ${ui.busy ? 'disabled' : ''}>${t('find_chat')}</button></div><div class="hf-sub">${t('hist_note')}</div>`;
+    const dis = ui.busy || ui.scanning ? 'disabled' : '';
+    let html = `<div class="hf-actions"><button class="hf-btn primary" data-hf="scan" ${dis}><i class="fa-solid fa-magnifying-glass"></i> ${ui.scanning ? t('scanning') : t('scan_whole')}</button></div>
+        <div class="hf-actions"><button class="hf-btn" data-hf="chat-find" ${dis}><i class="fa-solid fa-wand-magic-sparkles"></i> ${t('find_recent')}</button><button class="hf-btn" data-hf="chat-find-all" ${dis}><i class="fa-solid fa-layer-group"></i> ${t('find_all')}</button></div>
+        <div class="hf-sub">${t('hist_help')}</div><div class="hf-sub">${t('hist_note')}</div>`;
     if (!items.length) return html + `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-scroll"></i></div><p>${t('hist_empty')}</p></div>`;
     html += '<div class="hf-timeline">';
     for (const { h, m, passed } of items) {
@@ -985,7 +1194,7 @@ function viewHistory() {
             <div class="hf-tl-body"><div class="hf-name">${hIcon(h)} ${esc(h.name)} <span class="hf-badge">${passed ? t('passed') : t('mentioned')}</span></div>
             <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${m ? ` · ${t('msg')} #${m.first}${m.count > 1 ? `–#${m.last}` : ''} · ×${m.count}` : ''}</div>
             ${m?.snippet ? `<div class="hf-quote">…${esc(m.snippet)}…</div>` : ''}
-            <label class="checkbox_label"><input type="checkbox" data-hf="celebrate" data-id="${h.id}" ${st.celebrated[h.id] ? 'checked' : ''}><span>${t('mark_cel')}</span></label></div></div>`;
+            <label class="checkbox_label"><input type="checkbox" data-hf="celebrate" data-id="${h.id}" ${celebratedIn(h, nowParts().y) ? 'checked' : ''}><span>${t('mark_cel')}</span></label></div></div>`;
     }
     return html + '</div>';
 }
@@ -1008,6 +1217,12 @@ function viewProfiles() {
         <label>${t('rules')}<textarea class="text_pole" rows="3" data-p="rules" placeholder="${esc(t('rules_ph'))}">${esc(ep.rules)}</textarea></label>
         <div class="hf-actions"><button class="hf-btn" data-hf="profile-export">${t('export')}</button><button class="hf-btn" data-hf="profile-import">${t('import')}</button></div>
         <input type="file" id="hf_import_file" accept=".json,application/json" hidden></div>`;
+}
+
+function diagCard() {
+    return `<div class="hf-card"><div class="hf-h"><i class="fa-solid fa-stethoscope"></i> ${t('diag_btn')}</div><div class="hf-sub">${t('diag_hint')}</div>
+        <div class="hf-actions"><button class="hf-btn primary" data-hf="diag-run">${t('diag_run')}</button><button class="hf-btn" data-hf="diag-copy">${t('diag_copy')}</button></div>
+        <textarea class="text_pole hf-diag-area" readonly rows="8">${esc(ui.diagText)}</textarea></div>`;
 }
 
 function viewSettings() {
@@ -1035,10 +1250,29 @@ function viewSettings() {
             ${sel('tracker', t('tracker_opt'), [['last', t('tr_last')], ['all', t('tr_all')], ['off', t('tr_off')]])}
             ${sel('trackerPos', t('tracker_pos'), [['top', t('tp_top')], ['bottom', t('tp_bottom')]])}
             ${chk('strip', t('strip_opt'))}
-            ${chk('toast', t('toast_opt'))}</div>`;
+            ${chk('toast', t('toast_opt'))}</div>
+        ${diagCard()}`;
 }
 
-const TABS = [['overview', '<i class="fa-solid fa-house"></i>'], ['holidays', '<i class="fa-solid fa-calendar-days"></i>'], ['history', '<i class="fa-solid fa-scroll"></i>'], ['profiles', '<i class="fa-solid fa-earth-europe"></i>'], ['settings', '<i class="fa-solid fa-gear"></i>']];
+function busyBanner() {
+    if (!ui.busy) return '';
+    const p = ui.progress;
+    const pct = p ? Math.round((p.done / p.total) * 100) : 0;
+    return `<div class="hf-busy"><span class="hf-spin"></span><span class="hf-grow"><span class="hf-busy-label">${t('busy')}${p ? ` ${p.done}/${p.total}` : ''}</span>${p ? `<span class="hf-bar"><i style="width:${pct}%"></i></span>` : ''}</span><button class="hf-btn small" data-hf="cancel">${t('cancel')}</button></div>`;
+}
+
+function updateProgress() {
+    const el = document.querySelector('.hf-busy');
+    if (!el) return renderBody();
+    const p = ui.progress;
+    if (!p) return;
+    const bar = el.querySelector('.hf-bar i');
+    if (bar) bar.style.width = `${Math.round((p.done / p.total) * 100)}%`;
+    const lab = el.querySelector('.hf-busy-label');
+    if (lab) lab.textContent = `${t('busy')} ${p.done}/${p.total}`;
+}
+
+const TABS = [['overview', '<i class="fa-solid fa-house"></i>'], ['holidays', '<i class="fa-solid fa-gift"></i>'], ['calendar', '<i class="fa-solid fa-calendar-days"></i>'], ['history', '<i class="fa-solid fa-scroll"></i>'], ['profiles', '<i class="fa-solid fa-earth-europe"></i>'], ['settings', '<i class="fa-solid fa-gear"></i>']];
 
 function renderBody() {
     try {
@@ -1058,9 +1292,8 @@ function renderBodyInner() {
     if (!hasChat() || !C()) {
         body.innerHTML = `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-comment"></i></div><p>${t('open_chat')}</p></div>`;
     } else {
-        const views = { overview: viewOverview, holidays: viewHolidays, history: viewHistory, profiles: viewProfiles, settings: viewSettings };
-        const banner = ui.busy ? `<div class="hf-busy"><span class="hf-spin"></span><span class="hf-grow">${t('busy')}</span><button class="hf-btn small" data-hf="cancel">${t('cancel')}</button></div>` : '';
-        body.innerHTML = banner + views[ui.tab]();
+        const views = { overview: viewOverview, holidays: viewHolidays, calendar: viewCalendar, history: viewHistory, profiles: viewProfiles, settings: viewSettings };
+        body.innerHTML = busyBanner() + views[ui.tab]();
     }
     body.scrollTop = scroll;
     document.querySelectorAll('#hf-sheet .hf-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === ui.tab));
@@ -1088,7 +1321,7 @@ function renderStrip() {
     const next = list.find((x) => x.delta > 0);
     if (today) el.innerHTML = `<i class="fa-solid fa-champagne-glasses"></i> <b>${t('today')}:</b> ${esc(today.h.name)}`;
     else if (next) el.innerHTML = `${hIcon(next.h)} <b>${esc(next.h.name)}</b> <span class="hf-cd-inline" data-serial="${next.serial}">${inlineCd(next.mins)}</span> <small>${esc(fmtMD(cal, next.h.month, next.h.day))}</small>`;
-    else el.textContent = '<i class="fa-solid fa-calendar-days"></i> Holiday Forge';
+    else el.innerHTML = '<i class="fa-solid fa-calendar-days"></i> Holiday Forge';
 }
 
 /* ----------------------------------------------- tracker inside chat messages */
@@ -1107,7 +1340,7 @@ function trackerHtml() {
     const { cal } = nowParts();
     const list = upcoming();
     if (!list.length) {
-        return `<div class="hf-tracker hf-tr-empty" data-hf-open="1"><span class="hf-tr-ico-big"><i class="fa-solid fa-calendar-days"></i></span><span class="hf-tr-main"><span class="hf-tr-title">Holiday Forge</span><span class="hf-tr-sub">${esc(visible().length ? t('nothing_upcoming') : t('tr_empty') + ' · ' + t('tr_empty_hint'))}</span></span></div>`;
+        return `<div class="hf-tracker hf-tr-empty" data-hf-open="1"><span class="hf-tr-ico-big"><i class="fa-solid fa-calendar-days"></i></span><span class="hf-tr-main"><span class="hf-tr-title">Holiday Forge</span><span class="hf-tr-sub">${esc(visible().length ? nextYearHint() : t('tr_empty') + ' · ' + t('tr_empty_hint'))}</span></span></div>`;
     }
     const todays = list.filter((x) => x.delta === 0);
     const focus = todays[0] || list[0];
@@ -1130,6 +1363,8 @@ function trackerHtml() {
             ${todays.length > 1 ? `<div class="hf-tr-list-h">${t('tr_also')}</div>${todays.slice(1).map(row).join('')}` : ''}
             ${others.length ? `<div class="hf-tr-list-h">${t('tr_closest')}</div>${others.map(row).join('')}` : ''}
             <button class="hf-tr-open" data-hf-open="1">${t('tr_open')}</button>
+            <button class="hf-tr-open" data-hf-diag="1"><i class="fa-solid fa-stethoscope"></i> ${t('diag_btn')}</button>
+            ${ui.diagText ? `<textarea class="text_pole hf-diag-area" readonly rows="6">${esc(ui.diagText)}</textarea>` : ''}
         </div></details>`;
 }
 
@@ -1194,7 +1429,7 @@ function download(name, text) {
 
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
-async function runBusy(fn, noneKey = 't_lore_none') {
+async function runBusy(fn, noneKey = 't_lore_none', ms = 180000) {
     if (ui.busy) return;
     const id = ++ui.runId;
     runState = C();
@@ -1203,7 +1438,7 @@ async function runBusy(fn, noneKey = 't_lore_none') {
     inj.text = '';
     applyInjection();
     try {
-        const n = await withTimeout(fn(), 180000);
+        const n = await withTimeout(fn(), ms);
         if (id !== ui.runId) return;
         if (n === -1) window.toastr?.warning(t(noneKey));
         else if (n) window.toastr?.success(t('t_added', n));
@@ -1215,6 +1450,7 @@ async function runBusy(fn, noneKey = 't_lore_none') {
         window.toastr?.error(t('t_fail_d', e?.message || String(e)));
     }
     ui.busy = false;
+    ui.progress = null;
     runState = null;
     refreshAll();
     toastToday();
@@ -1222,6 +1458,7 @@ async function runBusy(fn, noneKey = 't_lore_none') {
 
 function cancelBusy() {
     ui.runId++;
+    ui.progress = null;
     ui.busy = false;
     runState = null;
     try { getContext().stopGeneration?.(); } catch { /* ignore */ }
@@ -1243,7 +1480,16 @@ const actions = {
         runBusy(() => generate(prompt));
     },
     'lore-scan': () => runBusy(scanLorebook),
-    'chat-find': () => runBusy(findInChat, 't_chat_none'),
+    'chat-find': () => runBusy(() => findInChat(false), 't_chat_none'),
+    'chat-find-all': async () => {
+        if (ui.busy) return;
+        const msgs = await getFullChat();
+        const list = chatList(msgs);
+        const n = chunkMessages(list).length;
+        if (!n) return window.toastr?.warning(t('t_chat_none'));
+        if (!confirm(t('c_whole', list.length, n))) return;
+        runBusy(() => findInChat(true, msgs), 't_chat_none', 6 * 3600 * 1000);
+    },
     cancel: () => cancelBusy(),
     add: () => { ui.editing = 'new'; ui.editIcon = ''; renderBody(); },
     edit: (el) => { ui.editing = el.dataset.id; ui.editIcon = holidays().find((x) => x.id === el.dataset.id)?.icon || ''; renderBody(); },
@@ -1251,7 +1497,7 @@ const actions = {
         ui.editIcon = el.dataset.icon;
         el.parentElement.querySelectorAll('.hf-ip').forEach((b) => b.classList.toggle('on', b === el));
     },
-    'cancel-edit': () => { ui.editing = null; renderBody(); },
+    'cancel-edit': () => { ui.editing = null; ui.editDraft = null; renderBody(); },
     'save-holiday': () => {
         const cal = nowParts().cal;
         const v = (id) => document.getElementById(id)?.value.trim() ?? '';
@@ -1259,9 +1505,10 @@ const actions = {
         if (!name) return window.toastr?.warning(t('t_name'));
         const month = mIdx(cal, v('hf_e_month'));
         const yr = v('hf_e_year');
+        const repeat = document.getElementById('hf_e_repeat')?.checked !== false;
         const data = {
-            name, month, day: dClamp(cal, month, v('hf_e_day')), year: yr === '' ? null : parseInt(yr, 10),
-            type: v('hf_e_type'), tone: v('hf_e_tone'), icon: ui.editIcon || '', description: v('hf_e_desc'), traditions: v('hf_e_trad'),
+            name, month, day: dClamp(cal, month, v('hf_e_day')), year: yr !== '' ? parseInt(yr, 10) : repeat ? null : nowParts().y,
+            type: v('hf_e_type'), tone: v('hf_e_tone'), icon: ui.editIcon || '', repeat, description: v('hf_e_desc'), traditions: v('hf_e_trad'),
             source: 'manual', hidden: false,
         };
         const st = C();
@@ -1274,6 +1521,7 @@ const actions = {
         }
         saveChat();
         ui.editing = null;
+        ui.editDraft = null;
         scanChat();
         refreshAll();
     },
@@ -1288,10 +1536,25 @@ const actions = {
         saveChat();
         refreshAll();
     },
-    celebrate: (el) => { const st = C(); if (el.checked) st.celebrated[el.dataset.id] = true; else delete st.celebrated[el.dataset.id]; saveChat(); renderBody(); },
-    scan: () => {
-        const r = scanChat();
+    celebrate: (el) => { setCelebrated(el.dataset.id, nowParts().y, el.checked); saveChat(); refreshAll(); },
+    'celebrate-y': (el) => { setCelebrated(el.dataset.id, +el.dataset.y, el.checked); saveChat(); refreshAll(); },
+    'cal-prev': () => calStep(-1),
+    'cal-next': () => calStep(1),
+    'cal-yprev': () => { ui.calY--; ui.calSel = null; renderBody(); },
+    'cal-ynext': () => { ui.calY++; ui.calSel = null; renderBody(); },
+    'cal-today': () => { const np = nowParts(); ui.calY = np.y; ui.calM = np.m; ui.calSel = np.d; renderBody(); },
+    'cal-day': (el) => { ui.calSel = +el.dataset.d; renderBody(); },
+    'cal-add': () => { ui.editing = 'new'; ui.editIcon = ''; ui.editDraft = { month: ui.calM, day: ui.calSel, year: '' }; ui.tab = 'holidays'; renderBody(); },
+    'diag-run': () => runDiag(),
+    'diag-copy': async () => { if (ui.diagText) { const ok = await copyText(ui.diagText); window.toastr?.[ok ? 'success' : 'info'](t(ok ? 'diag_copied' : 'diag_ready')); } },
+    scan: async () => {
+        if (ui.scanning) return;
+        ui.scanning = true;
         renderBody();
+        let r = null;
+        try { r = scanChat(await getFullChat()); } catch (e) { dlog('scan: ' + (e?.message || e)); r = scanChat(); }
+        ui.scanning = false;
+        refreshAll();
         if (!r) return;
         if (!r.holidays) window.toastr?.warning(t('t_scan_noh'));
         else if (!r.found) window.toastr?.info(t('t_scan_zero', r.holidays, r.messages));
@@ -1377,15 +1640,17 @@ function buildPanel() {
         <div class="hf-body"></div></div>`;
     document.body.appendChild(o);
 
-    o.addEventListener('click', (e) => {
-        if (e.target === o) return closePanel();
+    const sh0 = o.querySelector('#hf-sheet');
+    o.addEventListener('click', (e) => { if (e.target === o) closePanel(); });
+    sh0.addEventListener('click', (e) => {
         const el = e.target.closest('[data-hf]');
         if (!el || el.tagName === 'INPUT') return;
         try { actions[el.dataset.hf]?.(el); } catch (err) { console.error('[Holiday Forge]', err); window.toastr?.error('Holiday Forge: ' + (err?.message || err)); }
     });
-    o.addEventListener('change', (e) => {
+    sh0.addEventListener('change', (e) => {
         const el = e.target;
         if (el.dataset.hf === 'celebrate') return actions.celebrate(el);
+        if (el.dataset.hf === 'celebrate-y') return actions['celebrate-y'](el);
         if (el.id === 'hf_profile_pick') { C().profileId = el.value; ui.editingProfile = null; saveChat(); return refreshAll(); }
         if (el.id === 'hf_import_file' && el.files[0]) { importFile(el.files[0]); el.value = ''; return; }
         if (el.dataset.p) {
@@ -1434,19 +1699,85 @@ function openPanel() {
     }
 }
 
+function restoreSheet() {
+    const sh = document.getElementById('hf-sheet');
+    const o = document.getElementById('hf-overlay');
+    if (sh && o && sh.parentElement !== o) o.appendChild(sh);
+    const host = document.getElementById('hf_inline_host');
+    if (host) host.hidden = true;
+    ui.inline = false;
+}
+
+function overlayVisible() {
+    const sh = document.getElementById('hf-sheet');
+    if (!sh) return false;
+    const r = sh.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10) return false;
+    const el = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height - 8, 30));
+    return !!el && sh.contains(el);
+}
+
+/** If something in SillyTavern's mobile layout covers the panel, move it to the browser's top layer. */
+function ensureVisible() {
+    if (!ui.open || ui.inline) return;
+    if (overlayVisible()) { dlog('panel visible'); return; }
+    dlog('panel NOT visible, trying top layer');
+    const o = document.getElementById('hf-overlay');
+    try {
+        if (o?.showPopover) {
+            o.setAttribute('popover', 'manual');
+            o.showPopover();
+        }
+    } catch (e) { dlog('popover failed: ' + (e?.message || e)); }
+    setTimeout(() => {
+        if (ui.open && !overlayVisible()) { dlog('still hidden after top layer'); window.toastr?.warning(t('t_hidden')); }
+        else dlog('visible after top layer');
+    }, 300);
+}
+
 function openPanelInner() {
     buildPanel();
+    restoreSheet();
     ui.open = true;
     document.getElementById('hf-overlay').classList.remove('hf-hidden');
     document.body.classList.add('hf-lock');
-    if (hasChat()) { ensureClock(); scanChat(); }
+    dlog('open panel');
+    if (hasChat() && C()) { ensureClock(); scanChat(); }
     renderBody();
+    setTimeout(ensureVisible, 300);
+}
+
+/** Show the panel inside the Extensions drawer instead of a popup (always reachable). */
+function openInline() {
+    try {
+        buildPanel();
+        const host = document.getElementById('hf_inline_host');
+        const sh = document.getElementById('hf-sheet');
+        if (!host || !sh) return;
+        host.appendChild(sh);
+        host.hidden = false;
+        ui.inline = true;
+        ui.open = true;
+        document.getElementById('hf-overlay').classList.add('hf-hidden');
+        dlog('open inline');
+        if (hasChat() && C()) { ensureClock(); scanChat(); }
+        renderBody();
+        host.scrollIntoView?.({ block: 'start' });
+    } catch (e) {
+        dlog('inline failed: ' + (e?.message || e));
+        window.toastr?.error('Holiday Forge: ' + (e?.message || e));
+    }
 }
 
 function closePanel() {
+    const o = document.getElementById('hf-overlay');
+    try { if (o?.matches?.(':popover-open')) o.hidePopover(); } catch { /* ignore */ }
+    o?.removeAttribute('popover');
     ui.open = false;
     ui.editing = null;
-    document.getElementById('hf-overlay')?.classList.add('hf-hidden');
+    ui.editDraft = null;
+    if (ui.inline) restoreSheet();
+    o?.classList.add('hf-hidden');
     document.body.classList.remove('hf-lock');
 }
 
@@ -1475,10 +1806,16 @@ function mountDrawer() {
                 <div class="inline-drawer-content">
                     <label class="checkbox_label"><input type="checkbox" id="hf_drawer_enabled"><span>${t('drawer_enabled')}</span></label>
                     <div class="menu_button" id="hf_drawer_open"><i class="fa-solid fa-calendar-days"></i> ${t('drawer_open')}</div>
+                    <div class="menu_button" id="hf_drawer_inline"><i class="fa-solid fa-table-columns"></i> ${t('inline_btn')}</div>
+                    <div class="menu_button" id="hf_drawer_diag"><i class="fa-solid fa-stethoscope"></i> ${t('diag_btn')}</div>
+                    <textarea class="text_pole" id="hf_diag_out" rows="8" readonly hidden style="width:100%;font-size:12px"></textarea>
+                    <div id="hf_inline_host" class="hf-inline-host" hidden></div>
                 </div></div>`;
             host.appendChild(d);
             d.querySelector('#hf_drawer_enabled').addEventListener('change', (e) => { S().enabled = e.target.checked; saveSettingsDebounced(); refreshAll(); });
             d.querySelector('#hf_drawer_open').addEventListener('click', openPanel);
+            d.querySelector('#hf_drawer_inline').addEventListener('click', openInline);
+            d.querySelector('#hf_drawer_diag').addEventListener('click', runDiag);
             syncDrawer();
         }
     }
@@ -1491,6 +1828,97 @@ function mountDrawer() {
         w.addEventListener('click', openPanel);
         menu.appendChild(w);
     }
+}
+
+async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* try the legacy way */ }
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+    } catch { return false; }
+}
+
+const descEl = (el) => {
+    if (!el) return null;
+    const parts = [];
+    for (let n = el, i = 0; n && i < 3; n = n.parentElement, i++) {
+        parts.push(`${String(n.tagName || '').toLowerCase()}${n.id ? '#' + n.id : ''}${typeof n.className === 'string' && n.className ? '.' + n.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`);
+    }
+    return parts.join(' < ');
+};
+
+async function testOpen() {
+    const res = {};
+    try {
+        openPanel();
+        await new Promise((r) => setTimeout(r, 800));
+        const sh = document.getElementById('hf-sheet');
+        const r = sh?.getBoundingClientRect();
+        res.open = ui.open;
+        res.visible = overlayVisible();
+        res.sheetRect = r && [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+        res.topAtSheet = r ? descEl(document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height - 8, 30))) : null;
+        res.topAtCenter = descEl(document.elementFromPoint(innerWidth / 2, innerHeight / 2));
+        res.popoverOpen = !!document.getElementById('hf-overlay')?.matches?.(':popover-open');
+        closePanel();
+    } catch (e) { res.error = e?.message || String(e); }
+    return res;
+}
+
+async function collectDiag(withTest) {
+    const out = [];
+    const add = (k, v) => out.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+    const safe = (f) => { try { return f(); } catch (e) { return `ERR ${e?.message || e}`; } };
+    const ctx = safe(() => getContext());
+    add('Holiday Forge', VERSION);
+    add('UA', safe(() => navigator.userAgent));
+    add('viewport', safe(() => ({ w: innerWidth, h: innerHeight, dpr: devicePixelRatio, vv: visualViewport ? [Math.round(visualViewport.width), Math.round(visualViewport.height)] : null })));
+    add('css', safe(() => ({ colorMix: CSS.supports('color', 'color-mix(in srgb, red 50%, blue)'), dvh: CSS.supports('height', '100dvh'), inset: CSS.supports('inset', '0'), backdrop: CSS.supports('backdrop-filter', 'blur(2px)'), popover: 'popover' in HTMLElement.prototype, dialog: typeof HTMLDialogElement })));
+    add('ctx', safe(() => ({ keys: Object.keys(ctx).length, chatId: !!chatIdNow(), chatLen: (ctx.chat || []).length, chatMetadata: !!ctx.chatMetadata, characterId: ctx.characterId, groupId: !!ctx.groupId, eventTypes: !!(ctx.eventTypes || ctx.event_types), connMgr: !!ctx.ConnectionManagerRequestService, profiles: profiles().length, quiet: typeof ctx.generateQuietPrompt, setPrompt: typeof ctx.setExtensionPrompt, saveMeta: typeof ctx.saveMetadataDebounced, extSettings: !!ctx.extensionSettings, headers: typeof ctx.getRequestHeaders })));
+    add('settings', safe(() => { const s = { ...S() }; s.profiles = Object.keys(s.profiles).length; return s; }));
+    add('state', safe(() => { const st = C(); return st ? { holidays: st.holidays.length, mentions: Object.keys(st.mentions).length, celebrated: Object.keys(st.celebrated).length, clock: st.clock } : null; }));
+    add('ui', safe(() => ({ tab: ui.tab, open: ui.open, busy: ui.busy, inline: ui.inline })));
+    add('dom', safe(() => {
+        const q = (x) => document.querySelector(x);
+        const o = q('#hf-overlay');
+        const cs = o ? getComputedStyle(o) : null;
+        const sh = q('#hf-sheet');
+        const r = sh ? sh.getBoundingClientRect() : null;
+        const bs = getComputedStyle(document.body);
+        return {
+            overlay: !!o, hiddenClass: o?.classList.contains('hf-hidden'), display: cs?.display, position: cs?.position, z: cs?.zIndex, visibility: cs?.visibility, opacity: cs?.opacity,
+            parent: o?.parentElement?.tagName, popoverAttr: o?.getAttribute('popover'), sheetRect: r && [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+            body: { transform: bs.transform, filter: bs.filter, overflow: bs.overflow, position: bs.position, contain: bs.contain },
+            openDialogs: document.querySelectorAll('dialog[open]').length, widgets: document.querySelectorAll('.hf-tracker-wrap').length,
+            drawer: !!q('#hf_drawer'), wand: !!q('#hf_wand'), strip: !!q('#hf-strip'), extContainer: !!(q('#extensions_settings2') || q('#extensions_settings')),
+        };
+    }));
+    if (withTest) add('openTest', await testOpen());
+    add('log', diagLog.slice(-30));
+    return out.join('\n');
+}
+
+function syncDiag() {
+    document.querySelectorAll('.hf-diag-area, #hf_diag_out').forEach((el) => { el.value = ui.diagText; el.hidden = false; });
+}
+
+async function runDiag() {
+    ui.diagText = '…';
+    syncDiag();
+    const text = await collectDiag(!ui.open);
+    ui.diagText = text;
+    syncDiag();
+    ensureTracker(true);
+    if (ui.open) renderBody();
+    const ok = await copyText(text);
+    window.toastr?.[ok ? 'success' : 'info'](t(ok ? 'diag_copied' : 'diag_ready'));
 }
 
 function mountPoll() {
@@ -1545,7 +1973,10 @@ jQuery(async () => {
 
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ui.open) closePanel(); });
         document.addEventListener('toggle', (e) => { if (e.target?.classList?.contains('hf-tracker')) ui.trackerOpen = e.target.open; }, true);
-        document.addEventListener('click', (e) => { if (e.target.closest?.('[data-hf-open]')) openPanel(); });
+        document.addEventListener('click', (e) => {
+            if (e.target.closest?.('[data-hf-diag]')) runDiag();
+            else if (e.target.closest?.('[data-hf-open]')) openPanel();
+        });
 
         const chatEl = document.getElementById('chat');
         if (chatEl) {
@@ -1574,10 +2005,10 @@ jQuery(async () => {
 
         setInterval(tick, 5000);
         onChat();
-        if (S().seen !== '1.3.0') {
-            S().seen = '1.3.0';
+        if (S().seen !== VERSION) {
+            S().seen = VERSION;
             saveSettingsDebounced();
-            setTimeout(() => window.toastr?.success('Holiday Forge 1.3 loaded'), 1500);
+            setTimeout(() => window.toastr?.success(`Holiday Forge ${VERSION} loaded`), 1500);
         }
     } catch (e) {
         console.error('[Holiday Forge] init failed', e);
