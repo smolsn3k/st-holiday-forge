@@ -1,4 +1,4 @@
-// Holiday Forge v1.7 — SillyTavern extension
+// Holiday Forge v1.7.1 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,7 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -689,7 +689,8 @@ const HOLIDAY_RE = /holiday|festival|feast|celebrat|ritual|ceremon|solstice|equi
 
 async function collectLore() {
     const ctx = getContext();
-    const wi = await import('../../../world-info.js');
+    let wi = {};
+    try { wi = await import('../../../world-info.js'); } catch (e) { dlog('world-info import failed: ' + (e?.message || e)); }
     const active = new Set(wi.selected_world_info || []);
     const ch = ctx.characters?.[ctx.characterId];
     const linked = ch?.data?.extensions?.world;
@@ -1533,6 +1534,8 @@ function toastToday() {
         window.toastr?.info(`${x.h.name} — ${x.h.description}`.slice(0, 160), t('t_today'));
     }
 }
+
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
 function download(name, text) {
     const a = document.createElement('a');
