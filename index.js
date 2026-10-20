@@ -1,4 +1,4 @@
-// Holiday Forge v1.5 — SillyTavern extension
+// Holiday Forge v1.6 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,7 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -189,6 +189,10 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        io_h: 'Import / Export', io_export: 'Export (downloads a JSON file):', io_holidays: 'Holidays', io_world_h: 'World + holidays', io_world: 'World only', io_all: 'All worlds',
+        io_import: 'Import a file exported from Holiday Forge:', io_mode: 'If this chat already has holidays', io_merge: 'Merge (keep existing, add new)', io_replace: 'Replace them all',
+        io_with_hol: 'Also import the holidays found in the file', io_file: 'Choose file…', io_paste: 'Paste JSON instead', io_import_paste: 'Import pasted JSON',
+        t_io_empty: 'No holidays to export', t_io_done: (p, a, m) => `Imported: ${p} world(s), ${a} new holiday(s), ${m} merged`, io_short_exp: 'Export', io_short_imp: 'Import',
         lore_src: 'Lorebook source', lore_active: 'Active lorebooks (global, character, chat)', lore_selected: 'Only the lorebooks I pick',
         lore_none: 'No lorebooks found', toplayer_opt: 'Always show the panel above everything (use if the panel is hidden)',
         t_added: (n) => `Added ${n} holiday${n > 1 ? 's' : ''}`, t_nothing: 'Nothing new was added',
@@ -260,6 +264,10 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        io_h: 'Импорт / Экспорт', io_export: 'Экспорт (скачивает JSON-файл):', io_holidays: 'Праздники', io_world_h: 'Мир + праздники', io_world: 'Только мир', io_all: 'Все миры',
+        io_import: 'Импорт файла, экспортированного из Holiday Forge:', io_mode: 'Если в этом чате уже есть праздники', io_merge: 'Объединить (оставить текущие, добавить новые)', io_replace: 'Заменить все',
+        io_with_hol: 'Также импортировать праздники из файла', io_file: 'Выбрать файл…', io_paste: 'Вставить JSON вместо файла', io_import_paste: 'Импортировать вставленный JSON',
+        t_io_empty: 'Нет праздников для экспорта', t_io_done: (p, a, m) => `Импортировано: миров ${p}, новых праздников ${a}, объединено ${m}`, io_short_exp: 'Экспорт', io_short_imp: 'Импорт',
         lore_src: 'Источник лорбука', lore_active: 'Активные лорбуки (глобальные, персонажа, чата)', lore_selected: 'Только выбранные мной лорбуки',
         lore_none: 'Лорбуки не найдены', toplayer_opt: 'Всегда показывать панель поверх всего (если панель скрыта)',
         t_added: (n) => `Добавлено праздников: ${n}`, t_nothing: 'Ничего нового не добавлено',
@@ -294,7 +302,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
 const diagLog = [];
@@ -1104,7 +1112,12 @@ function viewHolidays() {
             <div class="hf-actions">
                 <button class="hf-btn" data-hf="lore-scan" ${dis}>${t('scan_lore')}</button>
                 <button class="hf-btn" data-hf="add">${t('add_own')}</button>
-            </div></div>
+            </div>
+            <div class="hf-actions">
+                <button class="hf-btn small" data-hf="exp-holidays"><i class="fa-solid fa-download"></i> ${t('io_short_exp')}</button>
+                <button class="hf-btn small" data-hf="profile-import"><i class="fa-solid fa-upload"></i> ${t('io_short_imp')}</button>
+            </div>
+            <input type="file" id="hf_import_file" accept=".json,application/json" hidden></div>
         <div class="hf-filters">${filters.map((f) => `<button class="hf-pill ${ui.filter === f ? 'on' : ''}" data-hf="filter" data-f="${f}">${f === 'all' ? t('all') : '<i class="fa-solid ' + TYPES[f].fa + '"></i> ' + t('type_' + f)}</button>`).join('')}</div>
         ${list.map((h) => holidayCard(h, cal)).join('') || `<div class="hf-empty"><p>${t('nothing_here')}</p></div>`}`;
 }
@@ -1247,7 +1260,24 @@ function viewProfiles() {
         <label>${t('calendar')}<select class="text_pole" data-p="calendarType"><option value="gregorian" ${ep.calendarType === 'gregorian' ? 'selected' : ''}>${t('cal_greg')}</option><option value="custom" ${ep.calendarType === 'custom' ? 'selected' : ''}>${t('cal_custom')}</option></select></label>
         ${ep.calendarType === 'custom' ? `<label>${t('months_label')}<textarea class="text_pole" rows="3" data-p="months" placeholder="${esc(t('months_ph'))}">${esc(ep.months)}</textarea></label>` : ''}
         <label>${t('rules')}<textarea class="text_pole" rows="3" data-p="rules" placeholder="${esc(t('rules_ph'))}">${esc(ep.rules)}</textarea></label>
-        <div class="hf-actions"><button class="hf-btn" data-hf="profile-export">${t('export')}</button><button class="hf-btn" data-hf="profile-import">${t('import')}</button></div>
+        </div>
+        ${ioCard()}`;
+}
+
+function ioCard() {
+    return `<div class="hf-card"><div class="hf-h"><i class="fa-solid fa-file-export"></i> ${t('io_h')}</div>
+        <div class="hf-sub">${t('io_export')}</div>
+        <div class="hf-actions">
+            <button class="hf-btn" data-hf="exp-holidays"><i class="fa-solid fa-download"></i> ${t('io_holidays')}</button>
+            <button class="hf-btn" data-hf="exp-world-h"><i class="fa-solid fa-download"></i> ${t('io_world_h')}</button>
+            <button class="hf-btn" data-hf="exp-world"><i class="fa-solid fa-download"></i> ${t('io_world')}</button>
+            <button class="hf-btn" data-hf="exp-all"><i class="fa-solid fa-download"></i> ${t('io_all')}</button></div>
+        <div class="hf-sub" style="margin-top:12px">${t('io_import')}</div>
+        <label>${t('io_mode')}<select class="text_pole" id="hf_import_mode"><option value="merge" ${ui.importMode === 'merge' ? 'selected' : ''}>${t('io_merge')}</option><option value="replace" ${ui.importMode === 'replace' ? 'selected' : ''}>${t('io_replace')}</option></select></label>
+        <label class="checkbox_label"><input type="checkbox" id="hf_import_hol" ${ui.importHol ? 'checked' : ''}><span>${t('io_with_hol')}</span></label>
+        <div class="hf-actions"><button class="hf-btn primary" data-hf="profile-import"><i class="fa-solid fa-upload"></i> ${t('io_file')}</button></div>
+        <details><summary>${t('io_paste')}</summary><textarea class="text_pole" id="hf_paste" rows="5"></textarea>
+            <div class="hf-actions"><button class="hf-btn" data-hf="import-paste">${t('io_import_paste')}</button></div></details>
         <input type="file" id="hf_import_file" accept=".json,application/json" hidden></div>`;
 }
 
@@ -1461,11 +1491,125 @@ function download(name, text) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     a.download = name;
+    document.body.appendChild(a);
     a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
 
-const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+const slug = (x) => String(x || 'world').replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '') || 'world';
+
+function memoryOf(list) {
+    const st = C();
+    const mem = {};
+    for (const h of list) {
+        const c = st.celebrated[h.id];
+        if (c && typeof c === 'object') {
+            const ys = Object.keys(c).filter((k) => c[k]).map(Number);
+            if (ys.length) mem[h.id] = ys;
+        }
+    }
+    return mem;
+}
+
+const exportHead = (kind) => ({ hf: 2, kind, app: 'holiday-forge', version: VERSION, exportedAt: new Date().toISOString() });
+
+function exportHolidays() {
+    const list = holidays();
+    return { ...exportHead('holidays'), world: P().name, holidays: list, memory: memoryOf(list) };
+}
+
+function exportWorld(withHolidays) {
+    const o = { ...exportHead('world'), profile: P() };
+    if (withHolidays) { o.holidays = holidays(); o.memory = memoryOf(o.holidays); }
+    return o;
+}
+
+const exportAllWorlds = () => ({ ...exportHead('bundle'), profiles: Object.values(S().profiles) });
+
+function importProfiles(arr, assign) {
+    const s = S();
+    const ids = [];
+    for (const raw of arr) {
+        if (!raw || typeof raw !== 'object') continue;
+        const id = uid();
+        let name = String(raw.name || 'Imported');
+        if (Object.values(s.profiles).some((p) => p.name === name)) name += ' (imported)';
+        s.profiles[id] = {
+            ...newProfile(id, name), world: String(raw.world || ''), faith: String(raw.faith || ''), region: String(raw.region || ''),
+            rules: String(raw.rules || ''), calendarType: raw.calendarType === 'custom' ? 'custom' : 'gregorian', months: String(raw.months || ''),
+        };
+        ids.push(id);
+    }
+    saveSettingsDebounced();
+    if (assign && ids.length === 1 && C()) { C().profileId = ids[0]; saveChat(); }
+    return ids.length;
+}
+
+function importHolidayList(list, memory, mode) {
+    const st = C();
+    const cal = calendar(P());
+    if (mode === 'replace') { st.holidays = []; st.celebrated = {}; st.mentions = {}; }
+    const byName = new Map(st.holidays.map((h) => [h.name.toLowerCase(), h]));
+    let added = 0, merged = 0;
+    for (const raw of list) {
+        if (!raw || !raw.name) continue;
+        const key = String(raw.name).trim().toLowerCase();
+        let target = byName.get(key);
+        if (!target) {
+            const month = mIdx(cal, raw.month);
+            const yr = parseInt(raw.year, 10);
+            target = {
+                id: uid(), name: String(raw.name).trim(), month, day: dClamp(cal, month, raw.day), year: Number.isNaN(yr) ? null : yr,
+                repeat: raw.repeat !== false, type: TYPES[raw.type] ? raw.type : 'cultural', description: String(raw.description || ''),
+                traditions: String(raw.traditions || ''), tone: String(raw.tone || ''), icon: iconKey(raw.icon),
+                source: ['manual', 'generated', 'lorebook', 'chat'].includes(raw.source) ? raw.source : 'manual', hidden: !!raw.hidden,
+            };
+            st.holidays.push(target);
+            byName.set(key, target);
+            added++;
+        } else merged++;
+        const ys = memory?.[raw.id];
+        if (Array.isArray(ys)) {
+            const c = (st.celebrated[target.id] = st.celebrated[target.id] && typeof st.celebrated[target.id] === 'object' ? st.celebrated[target.id] : {});
+            for (const y of ys) if (c[y] === undefined) c[y] = true;
+        }
+    }
+    saveChat();
+    scanChat();
+    return { added, merged };
+}
+
+/** Accepts v2 files (holidays / world / bundle), v1 files ({profile, holidays}), a bare profile, or a bare array of holidays. */
+function importData(data, mode, withHolidays) {
+    const res = { profiles: 0, added: 0, merged: 0 };
+    if (Array.isArray(data)) data = { kind: 'holidays', holidays: data };
+    if (!data || typeof data !== 'object') throw new Error('not a Holiday Forge file');
+    const kind = data.kind || (Array.isArray(data.profiles) ? 'bundle' : data.profile ? 'world' : Array.isArray(data.holidays) ? 'holidays' : data.name !== undefined ? 'world' : null);
+    if (!kind) throw new Error('unknown format');
+    if (kind === 'bundle') {
+        res.profiles = importProfiles(data.profiles || [], false);
+    } else if (kind === 'world') {
+        res.profiles = importProfiles([data.profile || data], true);
+        if (withHolidays && Array.isArray(data.holidays) && hasChat() && C()) Object.assign(res, importHolidayList(data.holidays, data.memory, mode), { profiles: res.profiles });
+    } else {
+        if (!hasChat() || !C()) throw new Error(t('open_chat'));
+        Object.assign(res, importHolidayList(data.holidays || [], data.memory, mode));
+    }
+    return res;
+}
+
+async function doImport(src) {
+    try {
+        const data = typeof src === 'string' ? JSON.parse(src) : src;
+        const r = importData(data, ui.importMode, ui.importHol);
+        window.toastr?.success(t('t_io_done', r.profiles, r.added, r.merged));
+        refreshAll();
+    } catch (e) {
+        console.error('[Holiday Forge] import', e);
+        window.toastr?.error(`${t('t_invalid')}${e?.message ? ` (${e.message})` : ''}`);
+    }
+}
 
 async function runBusy(fn, noneKey = 't_lore_none', ms = 180000) {
     if (ui.busy) return;
@@ -1641,26 +1785,22 @@ const actions = {
         C().profileId = null;
         saveSettingsDebounced(); saveChat(); refreshAll();
     },
-    'profile-export': () => download(`holiday-forge-${P().name.replace(/\W+/g, '_')}.json`, JSON.stringify({ hf: 1, profile: P(), holidays: holidays() }, null, 2)),
+    'exp-holidays': () => {
+        if (!holidays().length) return window.toastr?.warning(t('t_io_empty'));
+        download(`holiday-forge-holidays-${slug(P().name)}.json`, JSON.stringify(exportHolidays(), null, 2));
+    },
+    'exp-world-h': () => download(`holiday-forge-world-${slug(P().name)}.json`, JSON.stringify(exportWorld(true), null, 2)),
+    'exp-world': () => download(`holiday-forge-world-${slug(P().name)}-profile.json`, JSON.stringify(exportWorld(false), null, 2)),
+    'exp-all': () => download('holiday-forge-all-worlds.json', JSON.stringify(exportAllWorlds(), null, 2)),
+    'import-paste': () => {
+        const txt = document.getElementById('hf_paste')?.value.trim();
+        if (txt) doImport(txt);
+    },
     'profile-import': () => document.getElementById('hf_import_file')?.click(),
 };
 
 async function importFile(file) {
-    try {
-        const data = JSON.parse(await file.text());
-        const prof = data.profile || data;
-        const s = S();
-        const id = uid();
-        s.profiles[id] = { ...newProfile(id, prof.name || 'Imported'), ...prof, id };
-        C().profileId = id;
-        if (Array.isArray(data.holidays) && data.holidays.length && confirm(t('c_imp'))) {
-            mergeGenerated(data.holidays.map((h) => ({ ...h, id: uid() })));
-        }
-        saveSettingsDebounced(); saveChat(); scanChat(); refreshAll();
-        window.toastr?.success(t('t_imported'));
-    } catch {
-        window.toastr?.error(t('t_invalid'));
-    }
+    try { await doImport(await file.text()); } catch (e) { window.toastr?.error(t('t_invalid')); }
 }
 
 /* ------------------------------------------------------------- panel mount */
@@ -1699,6 +1839,8 @@ function buildPanel() {
         if (el.dataset.hf === 'celebrate-y') return actions['celebrate-y'](el);
         if (el.id === 'hf_profile_pick') { C().profileId = el.value; ui.editingProfile = null; saveChat(); return refreshAll(); }
         if (el.id === 'hf_import_file' && el.files[0]) { importFile(el.files[0]); el.value = ''; return; }
+        if (el.id === 'hf_import_mode') { ui.importMode = el.value; return; }
+        if (el.id === 'hf_import_hol') { ui.importHol = el.checked; return; }
         if (el.dataset.p) {
             P()[el.dataset.p] = el.value;
             saveSettingsDebounced();

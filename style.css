@@ -355,3 +355,5 @@ body.hf-lock { overscroll-behavior: contain; }
 .hf-tabs button { flex: none; white-space: nowrap; }
 .hf-body { flex: 1 1 auto; min-height: 0; }
 .hf-lorelist { max-height: 220px; overflow-y: auto; margin: 4px 0 8px; padding: 4px 8px; border: 1px solid var(--hf-line); border-radius: 10px; background: var(--hf-soft); }
+
+.hf-card details summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; color: var(--hf-muted); }
