@@ -12,6 +12,7 @@ Works on PC and mobile. Follows your active SillyTavern theme. English and Russi
 
 - **LLM holiday generation**: reads the character card, world info and chat, then creates holidays with name, date, type (religious / cultural / seasonal / personal), description, traditions, tone and an icon.
 - **World profiles**: world name, faith system, region, calendar (Gregorian or your own custom months) and custom rules. Each chat can use a different profile.
+- **Build a world from a fandom**: type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…) and the AI fills a world profile from what it knows, optionally with canon holidays. Review the result: the AI can be wrong about details.
 - **Manual editor**: add, edit, hide or delete holidays. Your own entries override generated ones. Pick an icon, choose "repeats every year" or one-off.
 - **In-chat widget**: sits at the top or bottom of the bot's message. Collapsed, it shows a progress ring and a live countdown to the next holiday. Expanded, it shows the description, traditions and the closest holidays.
 - **Calendar tab**: month grid with holiday icons, per-year "celebrated" marks, and a memory of which holiday happened in which year. Holidays repeat automatically next year.
@@ -125,6 +126,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 ## Возможности
 
 - **Генерация праздников через LLM** по карточке персонажа, World Info и чату: название, дата, тип, описание, традиции, тон, значок.
+- **Мир по фандому**: введите франшизу (Naruto, Аватар, Гарри Поттер…), и ИИ заполнит профиль мира тем, что знает, при желании с каноническими праздниками. Результат стоит проверить: в деталях ИИ может ошибаться.
 - **Профили миров**: название, система верований, регион, календарь (григорианский или свои месяцы), свои правила. Для каждого чата можно выбрать свой профиль.
 - **Ручной редактор**: свои праздники заменяют сгенерированные; выбор значка; «повторяется каждый год» или разовый.
 - **Виджет в сообщении бота** (вверху или внизу): кольцо прогресса и живой отсчёт до ближайшего праздника; в раскрытом виде описание, традиции и ближайшие праздники.

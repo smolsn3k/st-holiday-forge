@@ -1,4 +1,4 @@
-// Holiday Forge v1.7.1 — SillyTavern extension
+// Holiday Forge v1.8 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,7 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.7.1';
+const VERSION = '1.8.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -189,6 +189,11 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        fd_h: 'Build a world from a fandom', fd_hint: 'Type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…). The AI fills the profile from what it knows about that world. Check the result, the AI can be wrong about details.',
+        fd_name: 'Fandom / franchise', fd_name_ph: 'Naruto, Avatar: The Last Airbender, Harry Potter…', fd_focus: 'Focus (optional)', fd_focus_ph: 'e.g. Konoha, Fire Nation, 1990s',
+        fd_mode: 'Apply to', fd_new: 'A new profile', fd_over: 'Overwrite the current profile', fd_hol: 'Also generate canon holidays', fd_btn: 'Build world',
+        t_fd_need: 'Type a fandom name first', t_fd_bad: 'The AI did not return a usable profile. Try again or name the fandom more precisely.',
+        t_fd_done: (n, a) => `World “${n}” is ready${a ? `, ${a} holidays added` : ''}`,
         scan_date: 'Scan date from chat',
         c_rpdate: (label, ev) => `The AI thinks the current story date is:\n\n${label}\n\nBased on: ${ev}\n\nSet the in-world date to this?`,
         t_date_none: 'Could not find a date in the recent chat', t_date_set: (l) => `In-world date set: ${l}`,
@@ -267,6 +272,11 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        fd_h: 'Создать мир по фандому', fd_hint: 'Введите франшизу (Naruto, Аватар: Легенда об Аанге, Гарри Поттер…). ИИ заполнит профиль тем, что знает об этом мире. Проверьте результат: в деталях ИИ может ошибаться.',
+        fd_name: 'Фандом / франшиза', fd_name_ph: 'Naruto, Аватар: Легенда об Аанге, Гарри Поттер…', fd_focus: 'Фокус (необязательно)', fd_focus_ph: 'например, Коноха, Народ Огня, 1990-е',
+        fd_mode: 'Применить к', fd_new: 'Новому профилю', fd_over: 'Перезаписать текущий профиль', fd_hol: 'Также сгенерировать канонические праздники', fd_btn: 'Создать мир',
+        t_fd_need: 'Сначала введите название фандома', t_fd_bad: 'ИИ не вернул пригодный профиль. Попробуйте ещё раз или назовите фандом точнее.',
+        t_fd_done: (n, a) => `Мир «${n}» готов${a ? `, добавлено праздников: ${a}` : ''}`,
         scan_date: 'Определить дату из чата',
         c_rpdate: (label, ev) => `ИИ считает, что сейчас в истории:\n\n${label}\n\nОснование: ${ev}\n\nУстановить эту дату в мире?`,
         t_date_none: 'В последних сообщениях дата не найдена', t_date_set: (l) => `Дата в мире установлена: ${l}`,
@@ -308,7 +318,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
 const diagLog = [];
@@ -1012,6 +1022,81 @@ ${text}`;
     };
 }
 
+function parseJsonObject(text) {
+    const x = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/```(?:json)?/gi, '').trim();
+    const a = x.indexOf('{');
+    const b = x.lastIndexOf('}');
+    if (a >= 0 && b > a) {
+        try {
+            const d = JSON.parse(x.slice(a, b + 1).replace(/,\s*([\]}])/g, '$1'));
+            if (d && typeof d === 'object' && !Array.isArray(d)) return d;
+        } catch { /* fall back to scanning for the first complete object */ }
+    }
+    let depth = 0, start = -1, inStr = false, skip = false;
+    for (let i = 0; i < x.length; i++) {
+        const c = x[i];
+        if (inStr) { if (skip) skip = false; else if (c === '\\') skip = true; else if (c === '"') inStr = false; continue; }
+        if (c === '"') { inStr = true; continue; }
+        if (c === '{') { if (depth === 0) start = i; depth++; }
+        else if (c === '}') {
+            depth--;
+            if (depth === 0 && start >= 0) {
+                try { return JSON.parse(x.slice(start, i + 1).replace(/,\s*}/g, '}')); } catch { start = -1; }
+            }
+            if (depth < 0) depth = 0;
+        }
+    }
+    console.warn('[Holiday Forge] unparseable world reply:', text);
+    throw new Error(t('t_fd_bad'));
+}
+
+/** Fill a world profile (and optionally canon holidays) from what the model knows about a franchise. Returns null: it shows its own toast. */
+async function buildWorldFromFandom(fandom, focus, withHolidays, mode) {
+    const s = S();
+    const count = clamp(s.count || 8, 3, 15);
+    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Ignore the current chat's own setting: use ONLY your knowledge of the franchise below. Do not write story text.]
+Franchise: ${fandom}${focus ? `\nFocus: ${focus}` : ''}
+Describe this setting as a world profile that will be used to generate in-world holidays and celebrations. Fields:
+- "name": short profile name
+- "world": 2-4 sentences: setting, era, tone, key peoples and regions
+- "faith": canon religions, belief systems or spiritual traditions (short)
+- "region": cultures, nations or places that matter for celebrations
+- "calendarType": "custom" ONLY if the canon has its own named months or calendar, otherwise "gregorian"
+- "months": for a custom calendar "Name:days, Name:days, ..."; otherwise ""
+- "rules": 2-5 short rules for holidays in this world (for example which real-world holidays do NOT exist, the seasonal cycle, technology level, canon festivals to use)
+${withHolidays ? `- "holidays": ${count} canon festivals, celebrations or traditional observances of the franchise (or very faithful to its culture). Each: {"name":"","month":<number>,"day":<number>,"type":"religious|cultural|seasonal|personal","description":"1-2 sentences","traditions":"1-3 short customs","tone":"2-3 words","icon":"<one word from: ${ICON_WORDS.join(', ')}>"}. Number months by the calendar you define above.` : ''}
+Do not invent canon facts you are unsure about; stay generic and say so briefly in "rules" instead.
+Return ONLY one JSON object. No markdown, no commentary. Keep "type" and "calendarType" values in English. ${t('gl_line')[s.genLang] || t('gl_line').chat}`;
+    const o = parseJsonObject(await quiet(prompt, withHolidays ? 2800 : 1200));
+    const clean = (v, n) => String(v || '').trim().slice(0, n);
+    let calendarType = o.calendarType === 'custom' ? 'custom' : 'gregorian';
+    let months = clean(o.months, 600);
+    if (calendarType === 'custom' && parseMonths(months).length < 2) { calendarType = 'gregorian'; months = ''; }
+    const fields = { name: clean(o.name || fandom, 60), world: clean(o.world, 900), faith: clean(o.faith, 400), region: clean(o.region, 400), rules: clean(o.rules, 900), calendarType, months };
+    if (!fields.world && !fields.faith && !fields.rules) throw new Error(t('t_fd_bad'));
+
+    const st = C();
+    let prof;
+    if (mode === 'overwrite') {
+        prof = P();
+        Object.assign(prof, fields);
+    } else {
+        const id = uid();
+        if (Object.values(s.profiles).some((x) => x.name === fields.name)) fields.name += ' (2)';
+        prof = s.profiles[id] = { ...newProfile(id, fields.name), ...fields };
+        if (st) st.profileId = id;
+    }
+    // a different calendar makes the old in-world date meaningless: reset it (use "Scan date from chat" afterwards)
+    if (st && (calendarType === 'custom' || mode !== 'overwrite')) st.clock = null;
+    saveSettingsDebounced();
+    saveChat();
+
+    let added = 0;
+    if (withHolidays && st && Array.isArray(o.holidays)) added = mergeGenerated(normalize(o.holidays, calendar(prof), 'generated'));
+    window.toastr?.success(t('t_fd_done', prof.name, added));
+    return null;
+}
+
 async function ideasFor(h) {
     const p = P();
     const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
@@ -1300,6 +1385,7 @@ function viewProfiles() {
     return `<div class="hf-card"><div class="hf-h">${t('prof_chat_h')}</div>
         <select class="text_pole" id="hf_profile_pick">${ids.map((id) => `<option value="${id}" ${id === activeId ? 'selected' : ''}>${esc(s.profiles[id].name)}</option>`).join('')}</select>
         <div class="hf-actions"><button class="hf-btn" data-hf="profile-new">${t('new')}</button><button class="hf-btn" data-hf="profile-dup">${t('dup')}</button><button class="hf-btn danger" data-hf="profile-del">${t('delete')}</button></div></div>
+        ${fandomCard()}
         <div class="hf-card"><div class="hf-h">${t('edit_prof', esc(ep.name))}</div>
         <label>${t('prof_name')}<input class="text_pole" data-p="name" value="${esc(ep.name)}"></label>
         <label>${t('world_name')}<input class="text_pole" data-p="world" value="${esc(ep.world)}"></label>
@@ -1310,6 +1396,15 @@ function viewProfiles() {
         <label>${t('rules')}<textarea class="text_pole" rows="3" data-p="rules" placeholder="${esc(t('rules_ph'))}">${esc(ep.rules)}</textarea></label>
         </div>
         ${ioCard()}`;
+}
+
+function fandomCard() {
+    return `<div class="hf-card"><div class="hf-h"><i class="fa-solid fa-dragon"></i> ${t('fd_h')}</div><div class="hf-sub">${t('fd_hint')}</div>
+        <label>${t('fd_name')}<input class="text_pole" id="hf_fd_name" value="${esc(ui.fdName)}" placeholder="${esc(t('fd_name_ph'))}"></label>
+        <label>${t('fd_focus')}<input class="text_pole" id="hf_fd_focus" value="${esc(ui.fdFocus)}" placeholder="${esc(t('fd_focus_ph'))}"></label>
+        <label>${t('fd_mode')}<select class="text_pole" id="hf_fd_mode"><option value="new" ${ui.fdMode !== 'overwrite' ? 'selected' : ''}>${t('fd_new')}</option><option value="overwrite" ${ui.fdMode === 'overwrite' ? 'selected' : ''}>${t('fd_over')}</option></select></label>
+        <label class="checkbox_label"><input type="checkbox" id="hf_fd_hol" ${ui.fdHol ? 'checked' : ''}><span>${t('fd_hol')}</span></label>
+        <div class="hf-actions"><button class="hf-btn primary" data-hf="fandom-build" ${ui.busy ? 'disabled' : ''}><i class="fa-solid fa-wand-magic-sparkles"></i> ${t('fd_btn')}</button></div></div>`;
 }
 
 function ioCard() {
@@ -1672,7 +1767,8 @@ async function runBusy(fn, noneKey = 't_lore_none', ms = 180000) {
     try {
         const n = await withTimeout(fn(), ms);
         if (id !== ui.runId) return;
-        if (n === -1) window.toastr?.warning(t(noneKey));
+        if (n === null) { /* the function showed its own message */ }
+        else if (n === -1) window.toastr?.warning(t(noneKey));
         else if (n) window.toastr?.success(t('t_added', n));
         else window.toastr?.info(t('t_nothing'));
         scanChat();
@@ -1732,6 +1828,13 @@ const actions = {
         refreshAll();
         toastToday();
         window.toastr?.success(t('t_date_set', res.label));
+    },
+    'fandom-build': () => {
+        const name = document.getElementById('hf_fd_name')?.value.trim() ?? ui.fdName;
+        ui.fdName = name;
+        ui.fdFocus = document.getElementById('hf_fd_focus')?.value.trim() ?? ui.fdFocus;
+        if (!name) return window.toastr?.warning(t('t_fd_need'));
+        runBusy(() => buildWorldFromFandom(name, ui.fdFocus, ui.fdHol, ui.fdMode), 't_fd_bad');
     },
     'lore-scan': () => runBusy(scanLorebook),
     'chat-find': () => runBusy(() => findInChat(false), 't_chat_none'),
@@ -1913,6 +2016,10 @@ function buildPanel() {
         if (el.id === 'hf_import_file' && el.files[0]) { importFile(el.files[0]); el.value = ''; return; }
         if (el.id === 'hf_import_mode') { ui.importMode = el.value; return; }
         if (el.id === 'hf_import_hol') { ui.importHol = el.checked; return; }
+        if (el.id === 'hf_fd_name') { ui.fdName = el.value; return; }
+        if (el.id === 'hf_fd_focus') { ui.fdFocus = el.value; return; }
+        if (el.id === 'hf_fd_mode') { ui.fdMode = el.value; return; }
+        if (el.id === 'hf_fd_hol') { ui.fdHol = el.checked; return; }
         if (el.dataset.p) {
             P()[el.dataset.p] = el.value;
             saveSettingsDebounced();
