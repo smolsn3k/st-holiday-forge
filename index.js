@@ -1,9 +1,16 @@
-// Holiday Forge v1.9 — SillyTavern extension
+// Holiday Forge v1.10 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
 // silently kills the whole extension). Everything comes from the global SillyTavern context.
-const getContext = () => globalThis.SillyTavern.getContext();
+let ctxCache = null;
+let ctxAt = 0;
+const getContext = () => {
+    const now = performance.now();
+    if (!ctxCache || now - ctxAt > 250) { ctxCache = globalThis.SillyTavern.getContext(); ctxAt = now; }
+    return ctxCache;
+};
+const dropCtx = () => { ctxCache = null; };
 let stModule = null;
 import('../../../../script.js').then((m) => { stModule = m; }).catch(() => {});
 let extMod = null;
@@ -12,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.9.0';
+const VERSION = '1.10.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -123,6 +130,8 @@ const DEFAULTS = {
     count: 8,
     strip: true,
     tracker: 'last',
+    dateFollow: 'local',
+    dateAiEvery: 10,
     topLayer: false,
     loreMode: 'active',
     loreBooks: [],
@@ -189,6 +198,8 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        df_opt: 'Follow the date in the chat', df_off: 'off (set the date manually)', df_local: 'automatic, free (reads dates in recent messages)', df_ai: 'automatic + AI check every N messages',
+        df_every: 'AI check every N messages', df_hint: 'Automatic mode reads an explicit date such as “23 December 2026, 18:30” from the first or last lines of the newest messages, or from lines that say date/time. The AI option also asks the model when no date is found (uses extra requests).',
         lw_h: 'Build a world from a lorebook', lw_hint: 'Reads the lorebook entries chosen below (the first ~12,000 characters) and fills the profile from them: world, faith, region, calendar and rules. It stays within what the lore says.',
         lw_hol: 'Also create holidays described in (or fitting) the lorebook', lw_btn: 'Build from lorebook',
         fd_h: 'Build a world from a fandom', fd_hint: 'Type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…). The AI fills the profile from what it knows about that world. Check the result, the AI can be wrong about details.',
@@ -274,6 +285,8 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        df_opt: 'Следовать за датой в чате', df_off: 'выкл. (дату ставлю вручную)', df_local: 'автоматически, бесплатно (читает даты в последних сообщениях)', df_ai: 'автоматически + проверка ИИ каждые N сообщений',
+        df_every: 'Проверка ИИ каждые N сообщений', df_hint: 'Автоматический режим читает явную дату вроде «23 декабря 2026, 18:30» из первых или последних строк новых сообщений, либо из строк со словами «дата/время». Вариант с ИИ дополнительно спрашивает модель, если дата не найдена (это дополнительные запросы).',
         lw_h: 'Создать мир по лорбуку', lw_hint: 'Читает выбранные ниже записи лорбука (первые ~12 000 символов) и заполняет профиль: мир, верования, регион, календарь и правила. ИИ держится того, что написано в лоре.',
         lw_hol: 'Также создать праздники, описанные в лорбуке (или подходящие к нему)', lw_btn: 'Создать по лорбуку',
         fd_h: 'Создать мир по фандому', fd_hint: 'Введите франшизу (Naruto, Аватар: Легенда об Аанге, Гарри Поттер…). ИИ заполнит профиль тем, что знает об этом мире. Проверьте результат: в деталях ИИ может ошибаться.',
@@ -343,13 +356,17 @@ const uid = () => `hf_${Date.now().toString(36)}${Math.random().toString(36).sli
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+let sCache = null;
 function S() {
-    const s = (ES()[MODULE] ??= {});
+    const root = ES();
+    if (root[MODULE] && root[MODULE] === sCache) return sCache;
+    const s = (root[MODULE] ??= {});
     for (const k of Object.keys(DEFAULTS)) {
         if (!(k in s)) s[k] = structuredClone(DEFAULTS[k]);
     }
     if (!Object.keys(s.profiles).length) s.profiles.default = newProfile('default', 'Default world');
     if (!s.profiles[s.defaultProfile]) s.defaultProfile = Object.keys(s.profiles)[0];
+    sCache = s;
     return s;
 }
 
@@ -584,35 +601,64 @@ function nameMatchers(name) {
 // SillyTavern's /hide marks messages as is_system; they are still real story messages, so they must be scanned.
 const isMsg = (m) => !!(m && m.mes && !['command', 'assistant_note'].includes(m.extra?.type) && !m.extra?.isSmallSys);
 
-function scanChat(msgs) {
+const matcherCache = new Map();
+const matchersFor = (name) => {
+    let m = matcherCache.get(name);
+    if (!m) { m = nameMatchers(name); matcherCache.set(name, m); }
+    return m;
+};
+const scanState = { key: null, sig: '', upto: 0 };
+const perf = { scans: 0, lastScanMs: 0, lastScanFull: true };
+
+/** incremental = only look at messages added since the last scan (used after each new message); otherwise the whole chat. */
+function scanChat(msgs, incremental = false) {
     const st = C();
     if (!st) return null;
-    const all = msgs || getContext().chat || [];
-    const chat = all.filter(isMsg);
-    const mentions = {};
-    for (const h of holidays()) {
-        const res = nameMatchers(h.name);
+    const t0 = performance.now();
+    const ctxChat = getContext().chat || [];
+    const all = msgs || ctxChat;
+    const hs = holidays();
+    const key = String(chatIdNow());
+    const sig = hs.map((h) => h.id + ':' + h.name).join('|');
+    const inc = incremental && !msgs && scanState.key === key && scanState.sig === sig && scanState.upto > 0 && all.length >= scanState.upto;
+    const mentions = inc ? st.mentions : {};
+    const before = inc ? null : JSON.stringify(st.mentions);
+    let changed = false;
+    const start = inc ? scanState.upto : 0;
+    for (const h of hs) {
+        const res = matchersFor(h.name);
         if (!res.length) continue;
-        all.forEach((m, i) => {
-            if (!isMsg(m)) return;
-            if (!res.every((re) => re.test(m.mes))) return;
+        for (let i = start; i < all.length; i++) {
+            const m = all[i];
+            if (!isMsg(m)) continue;
+            if (!res.every((re) => re.test(m.mes))) continue;
             const rec = (mentions[h.id] ??= { first: i, last: i, count: 0, snippet: '' });
             rec.last = i;
             rec.count++;
+            changed = true;
             const hit = res[0].exec(m.mes);
             const at = hit ? hit.index : 0;
             rec.snippet = m.mes.slice(Math.max(0, at - 40), at + h.name.length + 60).replace(/\s+/g, ' ').trim();
-        });
+        }
     }
-    st.mentions = mentions;
-    autoMarkPassed();
-    saveChat();
-    return { holidays: holidays().length, found: Object.keys(mentions).length, messages: chat.length };
+    if (!inc) { changed = JSON.stringify(mentions) !== before; st.mentions = mentions; }
+    scanState.key = key;
+    scanState.sig = sig;
+    scanState.upto = !msgs || msgs === ctxChat ? all.length : 0;
+    if (autoMarkPassed()) changed = true;
+    if (changed) saveChat(); // saving chat metadata is not free, so only when something changed
+    perf.scans++;
+    perf.lastScanMs = Math.round((performance.now() - t0) * 10) / 10;
+    perf.lastScanFull = !inc;
+    return { holidays: hs.length, found: Object.keys(mentions).length, messages: all.filter(isMsg).length };
 }
 
 function scheduleScan() {
     clearTimeout(scanTimer);
-    scanTimer = setTimeout(() => { scanChat(); if (ui.open) renderBody(); }, 1200);
+    scanTimer = setTimeout(() => {
+        const run = () => { scanChat(undefined, true); if (ui.open) renderBody(); };
+        if (window.requestIdleCallback) window.requestIdleCallback(run, { timeout: 4000 }); else run();
+    }, 2500);
 }
 
 function isPassed(h) {
@@ -630,26 +676,28 @@ function isPassed(h) {
 function autoMarkPassed() {
     const st = C();
     const { cal, day, y } = nowParts();
+    let changed = false;
     for (const h of holidays()) {
         if (!st.mentions[h.id]) continue;
         const c = st.celebrated[h.id];
         if (c && typeof c === 'object' && c[y] !== undefined) continue;
         const date = hasFixedYear(h) ? toDay(cal, +h.year, h.month, h.day) : toDay(cal, y, h.month, h.day);
-        if (date < day) setCelebrated(h.id, hasFixedYear(h) ? +h.year : y, true);
+        if (date < day) { setCelebrated(h.id, hasFixedYear(h) ? +h.year : y, true); changed = true; }
     }
+    return changed;
 }
 
 /* -------------------------------------------------------------- injection */
 
-async function tokens(text) {
-    try {
-        const ctx = getContext();
-        if (ctx.getTokenCountAsync) return await ctx.getTokenCountAsync(text);
-    } catch { /* fall through */ }
-    return Math.ceil(text.length / 3.6);
-}
+// Cheap local estimate (non-Latin text costs more tokens per character). Calling SillyTavern's tokenizer here
+// delayed every generation, and some tokenizers do a network request.
+const tokens = (text) => {
+    let ascii = 0;
+    for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) < 128) ascii++;
+    return Math.ceil(ascii / 3.8 + (text.length - ascii) / 1.8);
+};
 
-async function buildInjection() {
+function buildInjection() {
     const s = S();
     if (!s.enabled || !s.inject || !hasChat() || !C() || !visible().length) return '';
     const { cal, y, m, d } = nowParts();
@@ -667,11 +715,11 @@ async function buildInjection() {
     }
     lines.push('Characters may mention these occasions naturally when it fits; never force them.');
     let text = lines.join('\n');
-    while ((await tokens(text)) > s.tokenBudget && lines.length > 2) {
+    while (tokens(text) > s.tokenBudget && lines.length > 2) {
         lines.splice(lines.length - 2, 1);
         text = lines.join('\n');
     }
-    if ((await tokens(text)) > s.tokenBudget) text = lines.slice(0, 2).join('\n');
+    if (tokens(text) > s.tokenBudget) text = lines.slice(0, 2).join('\n');
     return text;
 }
 
@@ -682,9 +730,9 @@ function applyInjection() {
     getContext().setExtensionPrompt?.(PROMPT_KEY, on ? inj.text : '', 1 /* IN_CHAT */, clamp(s.depth, 0, 20), false, 0 /* SYSTEM */);
 }
 
-async function refreshInjection() {
+function refreshInjection() {
     try {
-        inj.text = await buildInjection();
+        inj.text = buildInjection();
     } catch (e) {
         console.warn('[Holiday Forge] injection failed', e);
         inj.text = '';
@@ -1495,6 +1543,9 @@ function viewSettings() {
             ${sel('dateFormat', t('date_fmt'), [['DMY', t('fmt_dmy')], ['MDY', t('fmt_mdy')], ['YMD', t('fmt_ymd')]])}
             ${num('offset', t('offset'), -3650, 3650)}
             ${num('flow', t('flow'), 0, 1440)}
+            ${sel('dateFollow', t('df_opt'), [['off', t('df_off')], ['local', t('df_local')], ['ai', t('df_ai')]])}
+            ${num('dateAiEvery', t('df_every'), 2, 200)}
+            <div class="hf-sub">${t('df_hint')}</div>
             ${sel('tracker', t('tracker_opt'), [['last', t('tr_last')], ['all', t('tr_all')], ['off', t('tr_off')]])}
             ${sel('trackerPos', t('tracker_pos'), [['top', t('tp_top')], ['bottom', t('tp_bottom')]])}
             ${chk('strip', t('strip_opt'))}
@@ -1621,6 +1672,13 @@ function trackerHtml() {
         </div></details>`;
 }
 
+function lastBotMes(chat) {
+    for (let el = chat.lastElementChild; el; el = el.previousElementSibling) {
+        if (el.classList.contains('mes') && el.getAttribute('is_user') !== 'true' && el.getAttribute('is_system') !== 'true') return el;
+    }
+    return null;
+}
+
 function ensureTracker(force = false) {
     const s = S();
     const chat = document.getElementById('chat');
@@ -1628,24 +1686,26 @@ function ensureTracker(force = false) {
     const clear = () => chat.querySelectorAll('.hf-tracker-wrap').forEach((n) => n.remove());
     if (!s.enabled || s.tracker === 'off' || !hasChat() || !C()) return clear();
 
-    const html = trackerHtml();
-    const bots = [...chat.querySelectorAll('.mes')].filter((m) => m.getAttribute('is_system') !== 'true' && m.getAttribute('is_user') !== 'true');
-    const targets = s.tracker === 'all' ? bots : bots.length ? [bots[bots.length - 1]] : [];
+    let targets;
+    if (s.tracker === 'all') targets = [...chat.querySelectorAll('.mes:not([is_user="true"]):not([is_system="true"])')];
+    else { const last = lastBotMes(chat); targets = last ? [last] : []; }
     chat.querySelectorAll('.hf-tracker-wrap').forEach((n) => { if (!targets.includes(n.closest('.mes'))) n.remove(); });
 
     const top = s.trackerPos !== 'bottom';
+    let html = null;
     for (const mes of targets) {
         const mt = mes.querySelector('.mes_text');
         if (!mt || !mt.parentElement) continue;
         let wrap = mes.querySelector('.hf-tracker-wrap');
+        let fresh = false;
         if (!wrap) {
             wrap = document.createElement('div');
             wrap.className = 'hf-tracker-wrap';
-            force = true;
+            fresh = true;
         }
         const inPlace = top ? wrap.nextElementSibling === mt : wrap.previousElementSibling === mt;
         if (!inPlace) { if (top) mt.parentElement.insertBefore(wrap, mt); else mt.after(wrap); }
-        if (force) wrap.innerHTML = html;
+        if (force || fresh) { html ??= trackerHtml(); wrap.innerHTML = html; } // the HTML is only built when needed
     }
 }
 
@@ -1672,7 +1732,11 @@ function toastToday() {
     }
 }
 
-const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+const withTimeout = (p, ms) => {
+    let timer;
+    const limit = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timeout')), ms); });
+    return Promise.race([p, limit]).finally(() => clearTimeout(timer));
+};
 
 function download(name, text) {
     const a = document.createElement('a');
@@ -2328,6 +2392,7 @@ async function collectDiag(withTest) {
         };
     }));
     if (withTest) add('openTest', await testOpen());
+    add('perf', perf);
     add('log', diagLog.slice(-30));
     return out.join('\n');
 }
@@ -2365,6 +2430,143 @@ function syncDrawer() {
 
 /* -------------------------------------------------------------------- init */
 
+const dateRxCache = new Map();
+
+function dateMatchers(cal) {
+    const key = cal.map((c) => `${c.name}/${c.gen || ''}`).join('|');
+    let r = dateRxCache.get(key);
+    if (r) return r;
+    const words = new Map();
+    cal.forEach((c, i) => { words.set(c.name.toLowerCase(), i + 1); if (c.gen) words.set(c.gen.toLowerCase(), i + 1); });
+    if (cal.length === 12) {
+        GREGORIAN.forEach(([n], i) => { words.set(n.toLowerCase(), i + 1); words.set(n.slice(0, 3).toLowerCase(), i + 1); });
+        words.set('sept', 9);
+        GREG_RU.forEach(([n, g], i) => { words.set(n.toLowerCase(), i + 1); words.set(g, i + 1); });
+    }
+    const nonLatin = (w) => /[^\x00-\x7f]/.test(w);
+    // Russian words get a lenient ending ("декабря", "декабре", "декабрь"); Latin ones must match exactly
+    const alt = [...words.keys()].sort((a, b) => b.length - a.length)
+        .map((w) => (nonLatin(w) && w.length >= 5 ? `${reEsc(w.slice(0, -1))}\\p{L}{0,2}` : reEsc(w))).join('|');
+    const M = `(?<!\\p{L})(?:${alt})(?!\\p{L})`;
+    const monthOf = (tok) => {
+        const t = tok.toLowerCase().replace(/\.$/, '');
+        if (words.has(t)) return words.get(t);
+        for (const [w, i] of words) if (nonLatin(w) && w.length >= 5 && t.startsWith(w.slice(0, -1)) && t.length - (w.length - 1) <= 2) return i;
+        return null;
+    };
+    r = {
+        A: new RegExp(`(?<!\\d)(\\d{1,2})(?:st|nd|rd|th|-?(?:го|е))?\\.?\\s*(?:of\\s+)?(${M})\\.?(?:\\s*,?\\s*(\\d{3,4})(?!\\d))?`, 'giu'),
+        B: new RegExp(`(${M})\\.?\\s+(\\d{1,2})(?!\\d)(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{3,4})(?!\\d))?`, 'giu'),
+        C: /(?<!\d)(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?!\d)/g,
+        ISO: /(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g,
+        T: /(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)(?:\s*([ap]\.?m\.?))?/gi,
+        monthOf,
+    };
+    dateRxCache.set(key, r);
+    return r;
+}
+
+/** A free, instant date reader. It only trusts date "stamps": lines that say date/time/today, the very start or end of a message,
+ *  and short lines among the first/last lines (info blocks, scene headers). Dates inside long prose are ignored. */
+function localDate(text, cal) {
+    if (!text) return null;
+    const plain = String(text).replace(/<[^>]*>/g, ' ').trim();
+    if (!plain) return null;
+    const KEY = /(date|дата|📅|🗓|time|время|today|сегодня)/i;
+    const lines = plain.split('\n').map((l) => l.trim()).filter(Boolean);
+    const keyLines = lines.filter((l) => l.length < 200 && KEY.test(l));
+    const edge = [...lines.slice(0, 5), ...lines.slice(-5)].filter((l) => l.length <= 120);
+    const chunks = [...new Set([...keyLines, plain.slice(0, 45), ...edge, plain.slice(-45)])];
+    const R = dateMatchers(cal);
+    const mdy = S().dateFormat === 'MDY';
+    const find = (chunk) => {
+        const hits = [];
+        const push = (idx, m, d, y) => {
+            if (m >= 1 && m <= cal.length && d >= 1 && d <= cal[m - 1].days) hits.push({ idx, m, d, y: y && y >= 100 ? y : null });
+        };
+        for (const x of chunk.matchAll(R.A)) push(x.index, R.monthOf(x[2]), +x[1], x[3] ? +x[3] : null);
+        for (const x of chunk.matchAll(R.B)) push(x.index, R.monthOf(x[1]), +x[2], x[3] ? +x[3] : null);
+        for (const x of chunk.matchAll(R.C)) push(x.index, mdy ? +x[1] : +x[2], mdy ? +x[2] : +x[1], +x[3]);
+        for (const x of chunk.matchAll(R.ISO)) push(x.index, +x[2], +x[3], +x[1]);
+        return hits.length ? hits.sort((p, q) => q.idx - p.idx)[0] : null;
+    };
+    const timeIn = (chunk, near) => {
+        let best = null;
+        for (const x of chunk.matchAll(R.T)) {
+            const dist = near === undefined ? x.index : Math.abs(x.index - near);
+            if ((near === undefined || dist <= 120) && (!best || dist < best.dist)) best = { dist, x };
+        }
+        if (!best) return null;
+        let h = +best.x[1];
+        const ap = (best.x[3] || '').toLowerCase().replace(/[.\s]/g, '');
+        if (ap === 'pm' && h < 12) h += 12;
+        if (ap === 'am' && h === 12) h = 0;
+        return { h, min: +best.x[2] };
+    };
+    for (const chunk of chunks) {
+        const hit = find(chunk);
+        if (!hit) continue;
+        // time: next to the date, otherwise in the first/last few lines (a separate "time" line of an info block)
+        const t = timeIn(chunk, hit.idx) || timeIn([...lines.slice(0, 3), ...lines.slice(-3)].join('\n'));
+        if (t) { hit.h = t.h; hit.min = t.min; }
+        return hit;
+    }
+    return null;
+}
+
+/** Returns 'applied' (clock moved), 'same' (chat date equals the clock) or null (no date found). */
+function followDate(initial = false) {
+    const s = S();
+    if (!s.enabled || s.dateFollow === 'off' || !hasChat() || !C()) return null;
+    const np = nowParts();
+    const msgs = chatList(getContext().chat);
+    const lookback = initial ? 8 : 2;
+    for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - lookback); i--) {
+        const hit = localDate(msgs[i].mes, np.cal);
+        if (!hit) continue;
+        const y = hit.y ?? np.y;
+        const h = hit.h ?? np.h;
+        const min = hit.h !== undefined ? hit.min : np.min;
+        const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
+        if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
+        storeClock(total);
+        dlog(`date from chat: ${y}-${hit.m}-${hit.d} ${h}:${String(min).padStart(2, '0')}`);
+        return 'applied';
+    }
+    return null;
+}
+
+let followTimer = null, aiCounter = 0, aiDateBusy = false;
+
+/** Optional: ask the model for the date when no explicit date was found (every N messages, silently). */
+async function aiFollowDate() {
+    if (aiDateBusy || ui.busy) return;
+    aiDateBusy = true;
+    inj.text = '';
+    applyInjection(); // our own (possibly wrong) date must not bias the model
+    try {
+        const res = await withTimeout(scanRpDate(), 90000);
+        if (res && Math.floor(res.minutes / 60) !== Math.floor(clockMinutes(false) / 60)) {
+            storeClock(res.minutes);
+            dlog('date from AI: ' + res.label);
+        }
+    } catch (e) { dlog('AI date failed: ' + (e?.message || e)); }
+    aiDateBusy = false;
+    refreshAll();
+}
+
+function scheduleFollow(fromAi) {
+    clearTimeout(followTimer);
+    followTimer = setTimeout(() => {
+        const s = S();
+        let r = null;
+        try { r = followDate(false); } catch (e) { dlog('follow: ' + (e?.message || e)); }
+        if (r === 'applied') { refreshAll(); toastToday(); return; }
+        refreshInjection();
+        if (!r && fromAi && s.enabled && s.dateFollow === 'ai' && ++aiCounter >= Math.max(2, s.dateAiEvery)) { aiCounter = 0; aiFollowDate(); }
+    }, 800);
+}
+
 async function onChat() {
     if (ui.busy) { ui.runId++; ui.busy = false; runState = null; }
     ui.editing = null;
@@ -2372,6 +2574,7 @@ async function onChat() {
     if (!hasChat()) { renderStrip(); ensureTracker(true); inj.text = ''; applyInjection(); renderBody(); return; }
     const st = C();
     ensureClock();
+    try { followDate(true); } catch (e) { dlog('follow: ' + (e?.message || e)); }
     scanChat();
     refreshAll();
     toastToday();
@@ -2383,13 +2586,16 @@ async function onChat() {
     }
 }
 
+let tickN = 0;
 function tick() {
-    if (!hasChat() || !S().enabled) return;
+    if (document.hidden) return;
+    const s = S();
+    if (!s.enabled || s.flow <= 0 || !hasChat()) return; // with frozen in-world time nothing changes by itself
     const total = clockMinutes(true);
     document.querySelectorAll('.hf-cd').forEach((el) => { el.innerHTML = cdTiles(+el.dataset.serial * 1440 - total); });
     document.querySelectorAll('.hf-cd-inline').forEach((el) => { el.textContent = inlineCd(+el.dataset.serial * 1440 - total); });
     document.querySelectorAll('.hf-ring').forEach((el) => { el.innerHTML = ringInner(+el.dataset.serial * 1440 - total); });
-    if (S().flow > 0) { toastToday(); refreshInjection(); }
+    if (++tickN % 12 === 0) { toastToday(); refreshInjection(); } // about once a minute
 }
 
 jQuery(async () => {
@@ -2417,18 +2623,18 @@ jQuery(async () => {
         const ctx = getContext();
         const es = ctx.eventSource;
         const ev = ctx.eventTypes || ctx.event_types || {};
-        const on = (name, fn) => { if (ev[name]) es.on(ev[name], fn); };
+        const on = (name, fn) => { if (ev[name]) es.on(ev[name], (...a) => { dropCtx(); return fn(...a); }); };
         const later = () => setTimeout(() => ensureTracker(false), 200);
 
         on('APP_READY', () => { mountDrawer(); onChat(); });
         on('CHAT_CHANGED', onChat);
-        on('MESSAGE_RECEIVED', () => { scheduleScan(); refreshInjection(); later(); });
-        on('MESSAGE_SENT', () => { scheduleScan(); refreshInjection(); });
+        on('MESSAGE_RECEIVED', () => { scheduleScan(); scheduleFollow(true); later(); });
+        on('MESSAGE_SENT', () => { scheduleScan(); scheduleFollow(false); });
         on('MESSAGE_DELETED', () => { scheduleScan(); later(); });
         ['CHARACTER_MESSAGE_RENDERED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED'].forEach((n) => on(n, later));
-        on('GENERATION_STARTED', async (type, _params, dryRun) => {
+        on('GENERATION_STARTED', (type, _params, dryRun) => {
             if (type === 'quiet' || dryRun) return applyInjection();
-            await refreshInjection();
+            refreshInjection(); // synchronous: never delays a generation
         });
 
         setInterval(tick, 5000);
