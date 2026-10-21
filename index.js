@@ -1,4 +1,4 @@
-// Holiday Forge v1.8 — SillyTavern extension
+// Holiday Forge v1.9 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -12,7 +12,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -189,6 +189,8 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        lw_h: 'Build a world from a lorebook', lw_hint: 'Reads the lorebook entries chosen below (the first ~12,000 characters) and fills the profile from them: world, faith, region, calendar and rules. It stays within what the lore says.',
+        lw_hol: 'Also create holidays described in (or fitting) the lorebook', lw_btn: 'Build from lorebook',
         fd_h: 'Build a world from a fandom', fd_hint: 'Type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…). The AI fills the profile from what it knows about that world. Check the result, the AI can be wrong about details.',
         fd_name: 'Fandom / franchise', fd_name_ph: 'Naruto, Avatar: The Last Airbender, Harry Potter…', fd_focus: 'Focus (optional)', fd_focus_ph: 'e.g. Konoha, Fire Nation, 1990s',
         fd_mode: 'Apply to', fd_new: 'A new profile', fd_over: 'Overwrite the current profile', fd_hol: 'Also generate canon holidays', fd_btn: 'Build world',
@@ -272,6 +274,8 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        lw_h: 'Создать мир по лорбуку', lw_hint: 'Читает выбранные ниже записи лорбука (первые ~12 000 символов) и заполняет профиль: мир, верования, регион, календарь и правила. ИИ держится того, что написано в лоре.',
+        lw_hol: 'Также создать праздники, описанные в лорбуке (или подходящие к нему)', lw_btn: 'Создать по лорбуку',
         fd_h: 'Создать мир по фандому', fd_hint: 'Введите франшизу (Naruto, Аватар: Легенда об Аанге, Гарри Поттер…). ИИ заполнит профиль тем, что знает об этом мире. Проверьте результат: в деталях ИИ может ошибаться.',
         fd_name: 'Фандом / франшиза', fd_name_ph: 'Naruto, Аватар: Легенда об Аанге, Гарри Поттер…', fd_focus: 'Фокус (необязательно)', fd_focus_ph: 'например, Коноха, Народ Огня, 1990-е',
         fd_mode: 'Применить к', fd_new: 'Новому профилю', fd_over: 'Перезаписать текущий профиль', fd_hol: 'Также сгенерировать канонические праздники', fd_btn: 'Создать мир',
@@ -697,7 +701,7 @@ function profiles() {
 
 const HOLIDAY_RE = /holiday|festival|feast|celebrat|ritual|ceremon|solstice|equinox|harvest|carnival|fest\b|day of|eve\b|праздн|фестивал|торжеств|ритуал|обряд|церемон|солнцестоян|равноденств|урожа|карнавал|день\s/i;
 
-async function collectLore() {
+async function collectLore(opts = {}) {
     const ctx = getContext();
     let wi = {};
     try { wi = await import('../../../world-info.js'); } catch (e) { dlog('world-info import failed: ' + (e?.message || e)); }
@@ -723,12 +727,12 @@ async function collectLore() {
     if (!picked) (ch?.data?.character_book?.entries || []).forEach((e) => { if (e.enabled !== false) entries.push({ comment: e.comment, key: e.keys, content: e.content }); });
 
     const fmt = (e) => `${e.comment || (e.key || []).join(', ')}: ${String(e.content || '').replace(/\s+/g, ' ').trim()}`;
-    let pool = entries.filter((e) => HOLIDAY_RE.test(`${e.comment || ''} ${(e.key || []).join(' ')} ${e.content || ''}`));
+    let pool = opts.all ? entries : entries.filter((e) => HOLIDAY_RE.test(`${e.comment || ''} ${(e.key || []).join(' ')} ${e.content || ''}`));
     if (!pool.length) pool = entries;
     let text = '';
     for (const e of pool) {
-        const line = fmt(e).slice(0, 900);
-        if (text.length + line.length > 7000) break;
+        const line = fmt(e).slice(0, opts.per || 900);
+        if (text.length + line.length > (opts.max || 7000)) break;
         text += line + '\n';
     }
     return { text: text.trim(), count: pool.length, books: [...names] };
@@ -1067,12 +1071,17 @@ Describe this setting as a world profile that will be used to generate in-world 
 ${withHolidays ? `- "holidays": ${count} canon festivals, celebrations or traditional observances of the franchise (or very faithful to its culture). Each: {"name":"","month":<number>,"day":<number>,"type":"religious|cultural|seasonal|personal","description":"1-2 sentences","traditions":"1-3 short customs","tone":"2-3 words","icon":"<one word from: ${ICON_WORDS.join(', ')}>"}. Number months by the calendar you define above.` : ''}
 Do not invent canon facts you are unsure about; stay generic and say so briefly in "rules" instead.
 Return ONLY one JSON object. No markdown, no commentary. Keep "type" and "calendarType" values in English. ${t('gl_line')[s.genLang] || t('gl_line').chat}`;
-    const o = parseJsonObject(await quiet(prompt, withHolidays ? 2800 : 1200));
+    return applyWorld(parseJsonObject(await quiet(prompt, withHolidays ? 2800 : 1200)), fandom, withHolidays, mode);
+}
+
+/** Turn the model's world JSON into a profile (new or overwritten) and optionally add its holidays. Returns null: it shows its own toast. */
+function applyWorld(o, fallbackName, withHolidays, mode) {
+    const s = S();
     const clean = (v, n) => String(v || '').trim().slice(0, n);
     let calendarType = o.calendarType === 'custom' ? 'custom' : 'gregorian';
     let months = clean(o.months, 600);
     if (calendarType === 'custom' && parseMonths(months).length < 2) { calendarType = 'gregorian'; months = ''; }
-    const fields = { name: clean(o.name || fandom, 60), world: clean(o.world, 900), faith: clean(o.faith, 400), region: clean(o.region, 400), rules: clean(o.rules, 900), calendarType, months };
+    const fields = { name: clean(o.name || fallbackName, 60), world: clean(o.world, 900), faith: clean(o.faith, 400), region: clean(o.region, 400), rules: clean(o.rules, 900), calendarType, months };
     if (!fields.world && !fields.faith && !fields.rules) throw new Error(t('t_fd_bad'));
 
     const st = C();
@@ -1095,6 +1104,30 @@ Return ONLY one JSON object. No markdown, no commentary. Keep "type" and "calend
     if (withHolidays && st && Array.isArray(o.holidays)) added = mergeGenerated(normalize(o.holidays, calendar(prof), 'generated'));
     window.toastr?.success(t('t_fd_done', prof.name, added));
     return null;
+}
+
+/** Fill a world profile (and optionally holidays) from the lorebook entries (all active books, or only the ones picked). */
+async function buildWorldFromLore(withHolidays, mode) {
+    const s = S();
+    const lore = await collectLore({ all: true, max: 12000, per: 1200 });
+    if (!lore.text) return -1;
+    const count = clamp(s.count || 8, 3, 15);
+    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
+Below are lorebook (World Info) entries that describe a roleplay world. Build a world profile that will be used to generate in-world holidays and celebrations. Use ONLY what the entries say; where they say nothing, stay generic instead of inventing facts. Fields:
+- "name": short profile name
+- "world": 2-4 sentences: setting, era, tone, key peoples and regions
+- "faith": religions, belief systems or spiritual traditions described (short)
+- "region": cultures, nations or places that matter for celebrations
+- "calendarType": "custom" ONLY if the lore defines its own named months or calendar, otherwise "gregorian"
+- "months": for a custom calendar "Name:days, Name:days, ..."; otherwise ""
+- "rules": 2-5 short rules for holidays in this world, taken from the lore (for example banned or unknown festivals, seasonal cycle, technology level)
+${withHolidays ? `- "holidays": up to ${count} holidays or festivals that the lore describes or clearly implies; if it gives fewer, add fitting ones consistent with the lore. Each: {"name":"","month":<number>,"day":<number>,"type":"religious|cultural|seasonal|personal","description":"1-2 sentences","traditions":"1-3 short customs","tone":"2-3 words","icon":"<one word from: ${ICON_WORDS.join(', ')}>"}. Number months by the calendar you define above.` : ''}
+Lorebook entries:
+${lore.text}
+
+Return ONLY one JSON object. No markdown, no commentary. Keep "type" and "calendarType" values in English. ${t('gl_line')[s.genLang] || t('gl_line').chat}`;
+    const fallback = lore.books.length === 1 ? lore.books[0] : 'Lorebook world';
+    return applyWorld(parseJsonObject(await quiet(prompt, withHolidays ? 2800 : 1200)), fallback, withHolidays, mode);
 }
 
 async function ideasFor(h) {
@@ -1386,6 +1419,7 @@ function viewProfiles() {
         <select class="text_pole" id="hf_profile_pick">${ids.map((id) => `<option value="${id}" ${id === activeId ? 'selected' : ''}>${esc(s.profiles[id].name)}</option>`).join('')}</select>
         <div class="hf-actions"><button class="hf-btn" data-hf="profile-new">${t('new')}</button><button class="hf-btn" data-hf="profile-dup">${t('dup')}</button><button class="hf-btn danger" data-hf="profile-del">${t('delete')}</button></div></div>
         ${fandomCard()}
+        ${loreWorldCard()}
         <div class="hf-card"><div class="hf-h">${t('edit_prof', esc(ep.name))}</div>
         <label>${t('prof_name')}<input class="text_pole" data-p="name" value="${esc(ep.name)}"></label>
         <label>${t('world_name')}<input class="text_pole" data-p="world" value="${esc(ep.world)}"></label>
@@ -1396,6 +1430,14 @@ function viewProfiles() {
         <label>${t('rules')}<textarea class="text_pole" rows="3" data-p="rules" placeholder="${esc(t('rules_ph'))}">${esc(ep.rules)}</textarea></label>
         </div>
         ${ioCard()}`;
+}
+
+function loreWorldCard() {
+    return `<div class="hf-card"><div class="hf-h"><i class="fa-solid fa-book-open"></i> ${t('lw_h')}</div><div class="hf-sub">${t('lw_hint')}</div>
+        ${loreSelect()}
+        <label>${t('fd_mode')}<select class="text_pole" id="hf_lw_mode"><option value="new" ${ui.fdMode !== 'overwrite' ? 'selected' : ''}>${t('fd_new')}</option><option value="overwrite" ${ui.fdMode === 'overwrite' ? 'selected' : ''}>${t('fd_over')}</option></select></label>
+        <label class="checkbox_label"><input type="checkbox" id="hf_lw_hol" ${ui.fdHol ? 'checked' : ''}><span>${t('lw_hol')}</span></label>
+        <div class="hf-actions"><button class="hf-btn primary" data-hf="lore-world" ${ui.busy ? 'disabled' : ''}><i class="fa-solid fa-wand-magic-sparkles"></i> ${t('lw_btn')}</button></div></div>`;
 }
 
 function fandomCard() {
@@ -1829,6 +1871,7 @@ const actions = {
         toastToday();
         window.toastr?.success(t('t_date_set', res.label));
     },
+    'lore-world': () => runBusy(() => buildWorldFromLore(ui.fdHol, ui.fdMode), 't_lore_none'),
     'fandom-build': () => {
         const name = document.getElementById('hf_fd_name')?.value.trim() ?? ui.fdName;
         ui.fdName = name;
@@ -2020,6 +2063,8 @@ function buildPanel() {
         if (el.id === 'hf_fd_focus') { ui.fdFocus = el.value; return; }
         if (el.id === 'hf_fd_mode') { ui.fdMode = el.value; return; }
         if (el.id === 'hf_fd_hol') { ui.fdHol = el.checked; return; }
+        if (el.id === 'hf_lw_mode') { ui.fdMode = el.value; return; }
+        if (el.id === 'hf_lw_hol') { ui.fdHol = el.checked; return; }
         if (el.dataset.p) {
             P()[el.dataset.p] = el.value;
             saveSettingsDebounced();
