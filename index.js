@@ -1,4 +1,4 @@
-// Holiday Forge v1.10 — SillyTavern extension
+// Holiday Forge v1.11 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -19,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -132,6 +132,7 @@ const DEFAULTS = {
     tracker: 'last',
     dateFollow: 'local',
     dateAiEvery: 10,
+    horaeSync: true,
     topLayer: false,
     loreMode: 'active',
     loreBooks: [],
@@ -198,6 +199,9 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        hr_opt: 'Follow the Horae extension’s date when Horae is active', hr_none: 'Horae: not detected', hr_disabled: (v) => `Horae ${v}: installed but switched off`,
+        hr_found: (v, d) => `Horae ${v} is active. Its current date: ${d}`, hr_hint: 'Horae keeps its own story timeline. When it is active, Holiday Forge takes the date and time from it (it has priority over reading the chat text) and falls back to the chat only if Horae has no readable date.',
+        ds_horae: 'synced with Horae', ds_chat: 'from chat', ds_manual: 'manual',
         df_opt: 'Follow the date in the chat', df_off: 'off (set the date manually)', df_local: 'automatic, free (reads dates in recent messages)', df_ai: 'automatic + AI check every N messages',
         df_every: 'AI check every N messages', df_hint: 'Automatic mode reads an explicit date such as “23 December 2026, 18:30” from the first or last lines of the newest messages, or from lines that say date/time. The AI option also asks the model when no date is found (uses extra requests).',
         lw_h: 'Build a world from a lorebook', lw_hint: 'Reads the lorebook entries chosen below (the first ~12,000 characters) and fills the profile from them: world, faith, region, calendar and rules. It stays within what the lore says.',
@@ -285,6 +289,9 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        hr_opt: 'Следовать за датой расширения Horae, если Horae активно', hr_none: 'Horae: не найдено', hr_disabled: (v) => `Horae ${v}: установлено, но выключено`,
+        hr_found: (v, d) => `Horae ${v} активно. Текущая дата в нём: ${d}`, hr_hint: 'Horae ведёт свою временную шкалу истории. Когда оно активно, Holiday Forge берёт дату и время из него (приоритет выше, чем у чтения текста чата) и возвращается к чату, только если у Horae нет понятной даты.',
+        ds_horae: 'синхронно с Horae', ds_chat: 'из чата', ds_manual: 'вручную',
         df_opt: 'Следовать за датой в чате', df_off: 'выкл. (дату ставлю вручную)', df_local: 'автоматически, бесплатно (читает даты в последних сообщениях)', df_ai: 'автоматически + проверка ИИ каждые N сообщений',
         df_every: 'Проверка ИИ каждые N сообщений', df_hint: 'Автоматический режим читает явную дату вроде «23 декабря 2026, 18:30» из первых или последних строк новых сообщений, либо из строк со словами «дата/время». Вариант с ИИ дополнительно спрашивает модель, если дата не найдена (это дополнительные запросы).',
         lw_h: 'Создать мир по лорбуку', lw_hint: 'Читает выбранные ниже записи лорбука (первые ~12 000 символов) и заполняет профиль: мир, верования, регион, календарь и правила. ИИ держится того, что написано в лоре.',
@@ -335,7 +342,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, dateSource: 'manual', fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
 const diagLog = [];
@@ -1270,7 +1277,7 @@ function viewOverview() {
         html += `<div class="hf-h">${t('next3')}</div><div class="hf-card">${list.slice(0, 3).map((x) => miniRow(x, np.cal)).join('') || `<div class="hf-sub">${esc(nextYearHint())}</div>`}</div>`;
     }
     const monthOpts = np.cal.map((m, i) => `<option value="${i + 1}" ${i + 1 === np.m ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
-    html += `<details class="hf-card hf-clock"><summary><i class="fa-solid fa-clock"></i> ${t('clock')} <b>&nbsp;${esc(fmtDate(np.cal, np.y, np.m, np.d))}</b>, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')}</summary>
+    html += `<details class="hf-card hf-clock"><summary><i class="fa-solid fa-clock"></i> ${t('clock')} <b>&nbsp;${esc(fmtDate(np.cal, np.y, np.m, np.d))}</b>, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')} <span class="hf-badge" style="margin-left:8px">${t('ds_' + ui.dateSource)}</span></summary>
         <div class="hf-grid">
             <label>${t('day')}<input class="text_pole" type="number" id="hf_cd_d" value="${np.d}" min="1"></label>
             <label>${t('month')}<select class="text_pole" id="hf_cd_m">${monthOpts}</select></label>
@@ -1544,6 +1551,9 @@ function viewSettings() {
             ${num('offset', t('offset'), -3650, 3650)}
             ${num('flow', t('flow'), 0, 1440)}
             ${sel('dateFollow', t('df_opt'), [['off', t('df_off')], ['local', t('df_local')], ['ai', t('df_ai')]])}
+            ${chk('horaeSync', t('hr_opt'))}
+            <div class="hf-sub">${esc(horaeStatus())}</div>
+            <div class="hf-sub">${t('hr_hint')}</div>
             ${num('dateAiEvery', t('df_every'), 2, 200)}
             <div class="hf-sub">${t('df_hint')}</div>
             ${sel('tracker', t('tracker_opt'), [['last', t('tr_last')], ['all', t('tr_all')], ['off', t('tr_off')]])}
@@ -1930,6 +1940,7 @@ const actions = {
         if (err) { console.error('[Holiday Forge]', err); return window.toastr?.error(t('t_fail_d', err?.message || String(err))); }
         if (!res) return window.toastr?.warning(t('t_date_none'));
         if (!confirm(t('c_rpdate', res.label, res.evidence))) return;
+        ui.dateSource = 'manual';
         storeClock(res.minutes);
         refreshAll();
         toastToday();
@@ -2025,6 +2036,7 @@ const actions = {
         else window.toastr?.success(t('t_scan_res', r.found, r.messages));
     },
     setclock: () => {
+        ui.dateSource = 'manual';
         const cal = calendar(P());
         const g = (id) => parseInt(document.getElementById(id)?.value, 10) || 0;
         const m = mIdx(cal, g('hf_cd_m'));
@@ -2033,7 +2045,7 @@ const actions = {
         refreshAll();
         toastToday();
     },
-    advance: (el) => { storeClock(clockMinutes(false) + parseInt(el.dataset.n, 10) * 1440); refreshAll(); toastToday(); },
+    advance: (el) => { ui.dateSource = 'manual'; storeClock(clockMinutes(false) + parseInt(el.dataset.n, 10) * 1440); refreshAll(); toastToday(); },
     ideas: async (el) => {
         const h = holidays().find((x) => x.id === el.dataset.id);
         if (!h) return;
@@ -2392,6 +2404,12 @@ async function collectDiag(withTest) {
         };
     }));
     if (withTest) add('openTest', await testOpen());
+    add('horae', safe(() => {
+        const H = globalThis.Horae;
+        if (!H) return { present: false };
+        const r = readHorae();
+        return { present: true, version: H.version, enabled: !!H.isEnabled?.(), raw: r, parsed: r ? parseHoraeDate(r, nowParts().cal) : null, source: ui.dateSource };
+    }));
     add('perf', perf);
     add('log', diagLog.slice(-30));
     return out.join('\n');
@@ -2461,6 +2479,7 @@ function dateMatchers(cal) {
         ISO: /(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g,
         T: /(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)(?:\s*([ap]\.?m\.?))?/gi,
         monthOf,
+        alt,
     };
     dateRxCache.set(key, r);
     return r;
@@ -2529,11 +2548,110 @@ function followDate(initial = false) {
         const min = hit.h !== undefined ? hit.min : np.min;
         const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
         if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
+        ui.dateSource = 'chat';
         storeClock(total);
         dlog(`date from chat: ${y}-${hit.m}-${hit.d} ${h}:${String(min).padStart(2, '0')}`);
         return 'applied';
     }
     return null;
+}
+
+/* ------------------------------------------------------------------ Horae */
+
+/** Horae (SillyTavern-Horae) exposes a read-only API on window.Horae. Its story date is free text, e.g. "1024年 春之月12日" or "23 December 2026". */
+function readHorae() {
+    try {
+        const H = globalThis.Horae;
+        if (!H || !H.isEnabled?.()) return null;
+        const ts = H.getLatestState?.()?.timestamp;
+        if (!ts) return null;
+        return { date: String(ts.story_date || '').trim(), time: String(ts.story_time || '').trim(), abs: String(ts.absolute || '').trim() };
+    } catch (e) {
+        dlog('Horae read failed: ' + (e?.message || e));
+        return null;
+    }
+}
+
+function horaeStatus() {
+    const H = globalThis.Horae;
+    if (!H) return t('hr_none');
+    let on = false;
+    try { on = !!H.isEnabled?.(); } catch { /* ignore */ }
+    if (!on) return t('hr_disabled', H.version || '?');
+    const r = readHorae();
+    return t('hr_found', H.version || '?', r ? `${r.date || '—'} ${r.time || ''}`.trim() : '—');
+}
+
+function parseHoraeDate(r, cal) {
+    const text = [r.date, r.abs].filter(Boolean).join(' ');
+    if (!text) return null;
+    const R = dateMatchers(cal);
+    let m = null, d = null, y = null, x;
+    // 2026年12月23日 / 12月23日 (also Korean 년 월 일)
+    if ((x = /(?:(\d{3,4})\s*[年년]\s*)?(\d{1,2})\s*[月월]\s*(\d{1,2})\s*[日일号]?/.exec(text))) { y = x[1] ? +x[1] : null; m = +x[2]; d = +x[3]; }
+    // 2026/12/23, 2026-12-23, 2026.12.23
+    if (!m && (x = /(?<!\d)(\d{4})[./-](\d{1,2})[./-](\d{1,2})(?!\d)/.exec(text))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+    // month names in any order, with or without a space ("23 December 2026", "Tide 12", "Dec 23rd")
+    if (!m) { const h = localDate(text, cal); if (h) { m = h.m; d = h.d; y = h.y; } }
+    // custom month names glued to the day: "1024年 春之月12日"
+    if (!m && (x = new RegExp(`(?:(\\d{3,4})\\s*[年년]?\\s*)?(${R.alt})\\s*(\\d{1,2})`, 'iu').exec(text))) {
+        const mm = R.monthOf(x[2]);
+        if (mm) { m = mm; d = +x[3]; y = x[1] ? +x[1] : null; }
+    }
+    if (!m || !d || m < 1 || m > cal.length || d < 1 || d > cal[m - 1].days) return null;
+    const out = { m, d, y: y && y >= 1 ? y : null };
+    const tm = /(\d{1,2})\s*[:：]\s*(\d{2})\s*([ap]\.?m\.?)?/i.exec(r.time || '');
+    if (tm) {
+        let h = +tm[1];
+        const ap = (tm[3] || '').toLowerCase().replace(/[.\s]/g, '');
+        if (ap === 'pm' && h < 12) h += 12;
+        if (ap === 'am' && h === 12) h = 0;
+        if (h <= 23 && +tm[2] <= 59) { out.h = h; out.min = +tm[2]; }
+    }
+    return out;
+}
+
+let horaeSig = '';
+let horaeOk = false;
+
+/** 'applied' | 'same' | null (Horae inactive, switched off in settings, or no readable date). */
+function followHorae(force = false) {
+    const s = S();
+    if (!s.enabled || !s.horaeSync || !hasChat() || !C()) return null;
+    const r = readHorae();
+    if (!r) return null;
+    const np = nowParts();
+    const sig = `${chatIdNow()}|${r.date}|${r.time}|${r.abs}`;
+    if (!force && sig === horaeSig) {
+        if (horaeOk) { ui.dateSource = 'horae'; return 'same'; }
+        return null; // Horae had no readable date: keep using the chat reader
+    }
+    const hit = parseHoraeDate(r, np.cal);
+    horaeSig = sig;
+    horaeOk = !!hit;
+    if (!hit) { dlog(`Horae date not understood: "${r.date}" "${r.time}"`); return null; }
+    const y = hit.y ?? np.y;
+    const h = hit.h ?? np.h;
+    const min = hit.h !== undefined ? hit.min : np.min;
+    const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
+    ui.dateSource = 'horae';
+    if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
+    storeClock(total);
+    dlog(`date from Horae: ${y}-${hit.m}-${hit.d} ${h}:${String(min).padStart(2, '0')}`);
+    return 'applied';
+}
+
+/** Horae first (structured, authoritative), then the chat-text reader. */
+function followAny(initial = false) {
+    const h = followHorae(initial);
+    if (h) return h;
+    return followDate(initial);
+}
+
+let horaeTimer = null;
+function scheduleHoraeRecheck() {
+    clearTimeout(horaeTimer); // Horae may finish analysing the message a bit later
+    horaeTimer = setTimeout(() => { if (followHorae() === 'applied') { refreshAll(); toastToday(); } }, 3500);
 }
 
 let followTimer = null, aiCounter = 0, aiDateBusy = false;
@@ -2547,6 +2665,7 @@ async function aiFollowDate() {
     try {
         const res = await withTimeout(scanRpDate(), 90000);
         if (res && Math.floor(res.minutes / 60) !== Math.floor(clockMinutes(false) / 60)) {
+            ui.dateSource = 'chat';
             storeClock(res.minutes);
             dlog('date from AI: ' + res.label);
         }
@@ -2560,7 +2679,7 @@ function scheduleFollow(fromAi) {
     followTimer = setTimeout(() => {
         const s = S();
         let r = null;
-        try { r = followDate(false); } catch (e) { dlog('follow: ' + (e?.message || e)); }
+        try { r = followAny(false); } catch (e) { dlog('follow: ' + (e?.message || e)); }
         if (r === 'applied') { refreshAll(); toastToday(); return; }
         refreshInjection();
         if (!r && fromAi && s.enabled && s.dateFollow === 'ai' && ++aiCounter >= Math.max(2, s.dateAiEvery)) { aiCounter = 0; aiFollowDate(); }
@@ -2574,7 +2693,7 @@ async function onChat() {
     if (!hasChat()) { renderStrip(); ensureTracker(true); inj.text = ''; applyInjection(); renderBody(); return; }
     const st = C();
     ensureClock();
-    try { followDate(true); } catch (e) { dlog('follow: ' + (e?.message || e)); }
+    try { followAny(true); } catch (e) { dlog('follow: ' + (e?.message || e)); }
     scanChat();
     refreshAll();
     toastToday();
@@ -2628,10 +2747,16 @@ jQuery(async () => {
 
         on('APP_READY', () => { mountDrawer(); onChat(); });
         on('CHAT_CHANGED', onChat);
-        on('MESSAGE_RECEIVED', () => { scheduleScan(); scheduleFollow(true); later(); });
+        on('MESSAGE_RECEIVED', () => { scheduleScan(); scheduleFollow(true); scheduleHoraeRecheck(); later(); });
         on('MESSAGE_SENT', () => { scheduleScan(); scheduleFollow(false); });
         on('MESSAGE_DELETED', () => { scheduleScan(); later(); });
         ['CHARACTER_MESSAGE_RENDERED', 'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'MESSAGE_EDITED'].forEach((n) => on(n, later));
+        ['MESSAGE_SWIPED', 'MESSAGE_EDITED', 'MESSAGE_DELETED'].forEach((n) => on(n, () => { scheduleFollow(false); scheduleHoraeRecheck(); }));
+        try { es.on('horae:settingsChanged', () => { if (followHorae(true) === 'applied') { refreshAll(); toastToday(); } if (ui.open) renderBody(); }); } catch { /* Horae not installed */ }
+        setInterval(() => { // safety net in case Horae finishes after our checks
+            if (document.hidden || !S().horaeSync || !globalThis.Horae) return;
+            if (followHorae() === 'applied') { refreshAll(); toastToday(); }
+        }, 15000);
         on('GENERATION_STARTED', (type, _params, dryRun) => {
             if (type === 'quiet' || dryRun) return applyInjection();
             refreshInjection(); // synchronous: never delays a generation

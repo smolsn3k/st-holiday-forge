@@ -23,6 +23,7 @@ Works on PC and mobile. Follows your active SillyTavern theme. English and Russi
 - **Character awareness**: injects a short summary of today's and upcoming holidays into the prompt, with a token budget, depth, frequency and look-ahead window.
 - **Scan date from chat**: the AI reads the recent messages, works out the story's current date and sets the in-world clock after you confirm.
 - **Follows the date in your chat**: reads explicit dates (e.g. “23 December 2026, 18:30”) from new messages and moves the in-world clock by itself, free and instant. Optional AI check every N messages.
+- **Horae integration**: if the [Horae](https://github.com/SenriYuki/SillyTavern-Horae) memory extension is active, Holiday Forge follows Horae's story date and time automatically (Horae 1.14+, via its public `window.Horae` API). Without Horae it reads dates from the chat itself.
 - **Per-chat state**: holidays, in-world date and "celebrated" memory belong to the chat, so different RPs never clash.
 - **API profile chooser**: run generation through any Connection Manager profile.
 - **Import / export**: holidays, one world, one world with its holidays, or all worlds as JSON files. Paste-JSON import for phones.
@@ -140,6 +141,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 - **Осведомлённость персонажей**: краткая сводка праздников попадает в промпт (лимит токенов, глубина, частота, горизонт).
 - **Определение даты из чата**: ИИ читает последние сообщения, находит текущую дату истории и (после вашего подтверждения) ставит её в календарь расширения.
 - **Следует за датой в чате**: читает явные даты (например, «23 декабря 2026, 18:30») из новых сообщений и сам двигает календарь, бесплатно и мгновенно. По желанию: проверка ИИ каждые N сообщений.
+- **Интеграция с Horae**: если активно расширение [Horae](https://github.com/SenriYuki/SillyTavern-Horae), Holiday Forge автоматически следует за его датой и временем истории (Horae 1.14+, через публичный `window.Horae`). Без Horae дата читается из самого чата.
 - **Состояние на чат**: праздники, дата в мире и память не пересекаются между разными чатами.
 - **Выбор API-профиля** (Connection Manager) для генерации.
 - **Импорт / экспорт** праздников и миров в JSON, в том числе вставкой текста.
