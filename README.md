@@ -14,6 +14,7 @@ Works on PC and mobile. Follows your active SillyTavern theme. English and Russi
 - **World profiles**: world name, faith system, region, calendar (Gregorian or your own custom months) and custom rules. Each chat can use a different profile.
 - **Build a world from a fandom**: type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…) and the AI fills a world profile from what it knows, optionally with canon holidays. Review the result: the AI can be wrong about details.
 - **Build a world from a lorebook**: fills the world profile (world, faith, region, calendar, rules) from your lorebook entries, active ones or only the books you pick, optionally with holidays from the lore.
+- **Birthdays**: add birthdays for the bot, your persona and NPCs. Find them automatically in the bot card or the persona card, or add them by hand. The year of birth is optional; with it the age is shown and passed to the characters. Birthdays repeat every year and appear in the countdown, calendar and widget.
 - **Manual editor**: add, edit, hide or delete holidays. Your own entries override generated ones. Pick an icon, choose "repeats every year" or one-off.
 - **In-chat widget**: sits at the top or bottom of the bot's message. Collapsed, it shows a progress ring and a live countdown to the next holiday. Expanded, it shows the description, traditions and the closest holidays.
 - **Calendar tab**: month grid with holiday icons, per-year "celebrated" marks, and a memory of which holiday happened in which year. Holidays repeat automatically next year.
@@ -90,6 +91,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 | --- | --- |
 | Overview | Countdown to the next holiday, today's holidays, next 3, in-world date controls and "Scan date from chat" |
 | Holidays | Generate, scan lorebook, add/edit/hide/delete, icon picker, export/import |
+| Birthdays | Find birthdays in the bot or persona card, add bot / persona / NPC birthdays by hand |
 | Calendar | Month grid, per-year "celebrated" marks, memory of past years |
 | History | Scan the chat, find new holidays in the chat, timeline of passed celebrations |
 | Profiles | World profiles, plus import/export |
@@ -132,6 +134,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 - **Мир по фандому**: введите франшизу (Naruto, Аватар, Гарри Поттер…), и ИИ заполнит профиль мира тем, что знает, при желании с каноническими праздниками. Результат стоит проверить: в деталях ИИ может ошибаться.
 - **Мир по лорбуку**: заполняет профиль мира (мир, верования, регион, календарь, правила) из записей вашего лорбука, активных или только выбранных, при желании с праздниками из лора.
 - **Профили миров**: название, система верований, регион, календарь (григорианский или свои месяцы), свои правила. Для каждого чата можно выбрать свой профиль.
+- **Дни рождения**: для бота, вашей персоны и NPC. Можно найти в карточке бота или персоны либо добавить вручную. Год рождения необязателен; с ним показывается и передаётся персонажам возраст. Дни рождения повторяются каждый год и видны в отсчёте, календаре и виджете.
 - **Ручной редактор**: свои праздники заменяют сгенерированные; выбор значка; «повторяется каждый год» или разовый.
 - **Виджет в сообщении бота** (вверху или внизу): кольцо прогресса и живой отсчёт до ближайшего праздника; в раскрытом виде описание, традиции и ближайшие праздники.
 - **Календарь**: сетка месяца, отметки «отпразднован» по годам, память о прошлых годах. На следующий год праздники повторяются сами.

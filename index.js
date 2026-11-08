@@ -1,4 +1,4 @@
-// Holiday Forge v1.11 — SillyTavern extension
+// Holiday Forge v1.12 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -19,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -199,6 +199,16 @@ const L = {
         t_hidden: 'The panel seems to be hidden behind other elements. Use “Open here (inline)” in the Extensions list and run Diagnostics.',
         src_chat: '<i class="fa-solid fa-comment"></i> chat', tr_none_left: 'No more holidays this year.',
         tr_next_year: (n, d) => `Next: ${n} in ${d} days.`,
+        tab_birthdays: 'Birthdays', bd_h: 'Birthdays', role_bot: 'bot', role_persona: 'persona', role_npc: 'NPC',
+        bd_hint: 'Birthdays repeat every year, appear in the countdown, calendar and widget, and are passed to the characters like other holidays. The year of birth is optional: with it the age is shown and passed along.',
+        bd_find_bot: 'Find in bot card', bd_find_persona: 'Find in persona card', bd_add_bot: 'Bot', bd_add_persona: 'Persona', bd_add_npc: 'NPC', bd_add_h: 'Add manually:',
+        bd_title: (p) => `${p}’s birthday`, bd_desc: (p, role, age) => `Birthday of ${p} (${role}).${age ? ` Turns ${age}.` : ''}`,
+        bd_person: 'Name', bd_role: 'Whose birthday', bd_year: 'Year of birth (optional)', bd_new: 'New birthday', bd_edit: 'Edit birthday',
+        bd_empty: 'No birthdays yet. Find them in the cards or add one manually.', bd_born: (y) => `born ${y}`, bd_age_now: (n) => `age ${n}`,
+        bd_need_name: 'Enter a name', bd_card_empty: (what) => `The ${what} card has no text to search`,
+        bd_none_found: (who) => `No birthday found in the card of “${who}”. You can add it manually.`,
+        bd_confirm: (person, role, label, ev) => `Found a birthday:\n\n${person} (${role}), ${label}\n\nBased on: ${ev}\n\nAdd it?`,
+        bd_added: (p) => `Birthday added: ${p}`, bd_updated: (p) => `Birthday updated: ${p}`, src_card: '<i class="fa-solid fa-id-card"></i> card',
         hr_opt: 'Follow the Horae extension’s date when Horae is active', hr_none: 'Horae: not detected', hr_disabled: (v) => `Horae ${v}: installed but switched off`,
         hr_found: (v, d) => `Horae ${v} is active. Its current date: ${d}`, hr_hint: 'Horae keeps its own story timeline. When it is active, Holiday Forge takes the date and time from it (it has priority over reading the chat text) and falls back to the chat only if Horae has no readable date.',
         ds_horae: 'synced with Horae', ds_chat: 'from chat', ds_manual: 'manual',
@@ -289,6 +299,16 @@ const L = {
         t_hidden: 'Похоже, панель скрыта за другими элементами. Нажмите «Открыть здесь» в списке расширений и запустите диагностику.',
         src_chat: '<i class="fa-solid fa-comment"></i> чат', tr_none_left: 'В этом году праздников больше нет.',
         tr_next_year: (n, d) => `Дальше: ${n} через ${d} дн.`,
+        tab_birthdays: 'Дни рождения', bd_h: 'Дни рождения', role_bot: 'бот', role_persona: 'персона', role_npc: 'NPC',
+        bd_hint: 'Дни рождения повторяются каждый год, попадают в отсчёт, календарь и виджет и передаются персонажам, как и другие праздники. Год рождения необязателен: с ним показывается и передаётся возраст.',
+        bd_find_bot: 'Найти в карточке бота', bd_find_persona: 'Найти в карточке персоны', bd_add_bot: 'Бот', bd_add_persona: 'Персона', bd_add_npc: 'NPC', bd_add_h: 'Добавить вручную:',
+        bd_title: (p) => `День рождения: ${p}`, bd_desc: (p, role, age) => `День рождения: ${p} (${role}).${age ? ` Исполняется ${age}.` : ''}`,
+        bd_person: 'Имя', bd_role: 'Чей день рождения', bd_year: 'Год рождения (необязательно)', bd_new: 'Новый день рождения', bd_edit: 'Изменить день рождения',
+        bd_empty: 'Пока нет дней рождения. Найдите их в карточках или добавьте вручную.', bd_born: (y) => `родился в ${y}`, bd_age_now: (n) => `возраст ${n}`,
+        bd_need_name: 'Введите имя', bd_card_empty: (what) => `В карточке (${what}) нет текста для поиска`,
+        bd_none_found: (who) => `В карточке «${who}» день рождения не найден. Можно добавить вручную.`,
+        bd_confirm: (person, role, label, ev) => `Найден день рождения:\n\n${person} (${role}), ${label}\n\nОснование: ${ev}\n\nДобавить?`,
+        bd_added: (p) => `День рождения добавлен: ${p}`, bd_updated: (p) => `День рождения обновлён: ${p}`, src_card: '<i class="fa-solid fa-id-card"></i> карточка',
         hr_opt: 'Следовать за датой расширения Horae, если Horae активно', hr_none: 'Horae: не найдено', hr_disabled: (v) => `Horae ${v}: установлено, но выключено`,
         hr_found: (v, d) => `Horae ${v} активно. Текущая дата в нём: ${d}`, hr_hint: 'Horae ведёт свою временную шкалу истории. Когда оно активно, Holiday Forge берёт дату и время из него (приоритет выше, чем у чтения текста чата) и возвращается к чату, только если у Horae нет понятной даты.',
         ds_horae: 'синхронно с Horae', ds_chat: 'из чата', ds_manual: 'вручную',
@@ -342,7 +362,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, dateSource: 'manual', fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, dateSource: 'manual', bdEditing: null, bdDraft: null, fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
 const diagLog = [];
@@ -714,6 +734,7 @@ function buildInjection() {
     const lines = [`[Holiday Forge — in-world date: ${fmtDate(cal, y, m, d)}]`];
     for (const x of list) {
         const h = x.h;
+        if (h.kind === 'birthday') { lines.push(birthdayLine(x, cal)); continue; }
         if (x.delta === 0) {
             lines.push(`TODAY: ${h.name} (${h.type}). ${short(h.description, 180)}${h.traditions ? ' Traditions: ' + short(h.traditions, 140) + '.' : ''}${h.tone ? ' Mood: ' + h.tone + '.' : ''}`);
         } else {
@@ -1188,7 +1209,7 @@ Return ONLY one JSON object. No markdown, no commentary. Keep "type" and "calend
 async function ideasFor(h) {
     const p = P();
     const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
-Suggest 3 short, concrete scene ideas (one sentence each, as a bullet list) for how the characters could spend "${h.name}" (${h.type}: ${h.description}) in this roleplay. Use the characters, setting and current mood of the chat. World: ${p.world || 'see context'}; faith: ${p.faith || 'see context'}. ${t('gl_line')[S().genLang] || t('gl_line').chat}`;
+Suggest 3 short, concrete scene ideas (one sentence each, as a bullet list) for how the characters could spend "${h.name}" (${h.type}: ${descOf(h)}) in this roleplay. Use the characters, setting and current mood of the chat. World: ${p.world || 'see context'}; faith: ${p.faith || 'see context'}. ${t('gl_line')[S().genLang] || t('gl_line').chat}`;
     return (await quiet(prompt, 600)).replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
@@ -1261,7 +1282,7 @@ function viewOverview() {
     } else {
         for (const x of today) {
             html += `<div class="hf-today" style="--c:${TYPES[x.h.type]?.color}"><div class="hf-today-h"><i class="fa-solid fa-champagne-glasses"></i> ${t('today')} — ${esc(x.h.name)}</div>
-                <div class="hf-sub">${esc(x.h.description)}</div>${x.h.traditions ? `<div class="hf-sub"><b>${t('traditions')}:</b> ${esc(x.h.traditions)}</div>` : ''}
+                <div class="hf-sub">${esc(descOf(x.h, x.year))}</div>${x.h.traditions ? `<div class="hf-sub"><b>${t('traditions')}:</b> ${esc(x.h.traditions)}</div>` : ''}
                 <button class="hf-btn small" data-hf="ideas" data-id="${x.h.id}">${t('scene_ideas')}</button>
                 <div class="hf-ideas">${esc(ui.ideas[x.h.id] || '')}</div></div>`;
         }
@@ -1270,7 +1291,7 @@ function viewOverview() {
                 <div class="hf-hero-top">${typeChip(next.h.type)}<span class="hf-sub">${esc(fmtMD(np.cal, next.h.month, next.h.day))}</span></div>
                 <div class="hf-hero-name">${esc(next.h.name)}</div>
                 <div class="hf-cd" data-serial="${next.serial}">${cdTiles(next.mins)}</div>
-                <div class="hf-sub">${esc(next.h.description)}</div>
+                <div class="hf-sub">${esc(descOf(next.h, next.year))}</div>
                 <button class="hf-btn small" data-hf="ideas" data-id="${next.h.id}">${t('scene_ideas')}</button>
                 <div class="hf-ideas">${esc(ui.ideas[next.h.id] || '')}</div></div>`;
         }
@@ -1301,7 +1322,7 @@ function holidayCard(h, cal) {
             <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${h.year ? ' ' + esc(h.year) : ''} · ${srcLabel(h)}${h.repeat === false ? ' · ' + t('one_off') : ''}${mention ? ` · <i class="fa-solid fa-comment"></i> ×${mention.count}` : ''}</div></div>
             ${typeChip(h.type)}</summary>
         <div class="hf-hbody">
-            ${h.description ? `<p>${esc(h.description)}</p>` : ''}
+            ${descOf(h) ? `<p>${esc(descOf(h))}</p>` : ''}
             ${h.traditions ? `<p><b>${t('traditions')}:</b> ${esc(h.traditions)}</p>` : ''}
             ${h.tone ? `<p><b>${t('tone')}:</b> ${esc(h.tone)}</p>` : ''}
             <div class="hf-actions">
@@ -1370,6 +1391,178 @@ function viewEditor(cal) {
         <div class="hf-sub">${t('editor_note')}</div></div>`;
 }
 
+/* ---------------------------------------------------------------- birthdays */
+
+function descOf(h, year) {
+    if (h.kind !== 'birthday') return h.description || '';
+    if (year === undefined) {
+        const np = nowParts();
+        year = fromDay(np.cal, occurrence(np.cal, h, np.day)).y;
+    }
+    const age = h.birthYear != null && year != null ? year - h.birthYear : null;
+    return t('bd_desc', h.person || h.name, t('role_' + (h.role || 'npc')), age != null && age > 0 ? age : null);
+}
+
+/** The line that goes into the prompt (always English, like the rest of the injected text). */
+function birthdayLine(x, cal) {
+    const h = x.h;
+    const who = h.role === 'bot' ? 'the character' : h.role === 'persona' ? "the user's persona" : 'an NPC';
+    const age = h.birthYear != null ? x.year - h.birthYear : null;
+    const turn = age != null && age > 0 ? `, turning ${age}` : '';
+    return x.delta === 0
+        ? `TODAY: birthday of ${h.person} (${who})${turn}.`
+        : `In ${x.delta} day${x.delta === 1 ? '' : 's'} (${fmtMD(cal, h.month, h.day)}): birthday of ${h.person} (${who})${turn}.`;
+}
+
+function defaultPerson(role) {
+    const ctx = getContext();
+    if (role === 'bot') return ctx.characters?.[ctx.characterId]?.name || ctx.name2 || '';
+    if (role === 'persona') return ctx.name1 || '';
+    return '';
+}
+
+/** Adds a birthday as a normal recurring holiday (so countdown, calendar, widget and prompt injection just work). */
+function addBirthday({ person, role, month, day, birthYear, source }) {
+    const st = C();
+    const existing = st.holidays.find((h) => h.kind === 'birthday' && h.role === role && String(h.person).toLowerCase() === person.toLowerCase());
+    if (existing) {
+        Object.assign(existing, { month, day, birthYear: birthYear ?? existing.birthYear ?? null, name: t('bd_title', person), hidden: false });
+        saveChat();
+        return 'updated';
+    }
+    st.holidays.push({
+        id: uid(), kind: 'birthday', person, role, birthYear: birthYear ?? null, name: t('bd_title', person), month, day, year: null, repeat: true,
+        type: 'personal', description: '', traditions: '', tone: '', icon: 'cake', source: source || 'manual', hidden: false,
+    });
+    saveChat();
+    return 'added';
+}
+
+const BD_KEY = /(birth\s*-?\s*day|b-?day|date of birth|birth\s*date|(?<![\p{L}])born(?![\p{L}])|день рождения|дата рождения|родил(?:ся|ась|ось)|生日|出生|誕生日|생일)/iu;
+
+function localAge(text) {
+    const m = /(?:(?<![\p{L}])age|возраст)\s*[:\-–—]?\s*(\d{1,3})(?!\d)/iu.exec(text)
+        || /(\d{1,3})\s*[- ]?\s*(?:years?[- ]old|y\.?o\.?(?![\p{L}])|лет(?![\p{L}])|года?(?![\p{L}]))/iu.exec(text);
+    const n = m ? +m[1] : null;
+    return n && n >= 1 && n <= 999 ? n : null;
+}
+
+/** Free and instant: a sentence that mentions birthday / born / date of birth and contains a date. */
+function localBirthday(text, cal) {
+    const sentences = String(text).replace(/<[^>]*>/g, ' ').split(/\n|(?<=[.!?。])\s+/);
+    for (const raw of sentences) {
+        const sn = raw.trim();
+        if (!sn || !BD_KEY.test(sn)) continue;
+        const k = sn.search(BD_KEY);
+        const seg = sn.slice(Math.max(0, k - 10), k + 110);
+        const hit = parseHoraeDate({ date: seg, time: '', abs: '' }, cal);
+        if (hit) return { m: hit.m, d: hit.d, birthYear: hit.y ?? null, age: localAge(text), evidence: seg.trim().slice(0, 160) };
+    }
+    return null;
+}
+
+async function aiFindBirthday(src, role, cal) {
+    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
+Read this ${role === 'persona' ? 'user persona' : 'character card'} text for "${src.person}". Find ${src.person}'s birthday (date of birth) ONLY if the text states it or clearly implies an exact date. A zodiac sign or season is not enough. Do not guess or invent. Also report the stated age if there is one.
+Calendar: months numbered ${cal.map((m, i) => `${i + 1}=${m.name}(${m.days}d)`).join(', ')}
+Return ONLY a JSON object, no markdown, no commentary:
+{"found":true,"day":<number>,"month":<number 1-${cal.length}>,"birthYear":<number or null>,"age":<number or null>,"evidence":"short quote"}
+or {"found":false}
+Text:
+${src.text.slice(0, 6000)}`;
+    const o = parseJsonList(await quiet(prompt, 400))[0];
+    if (!o || o.found === false) return null;
+    const m = monthFromAny(cal, o.month);
+    if (!m || !o.day) return null;
+    const by = Math.round(+o.birthYear);
+    const age = Math.round(+o.age);
+    return { m, d: dClamp(cal, m, o.day), birthYear: Number.isNaN(by) ? null : by, age: Number.isNaN(age) || age < 1 ? null : age, evidence: String(o.evidence || '—').slice(0, 160) };
+}
+
+async function cardText(role) {
+    const ctx = getContext();
+    if (role === 'persona') {
+        let desc = ctx.powerUserSettings?.persona_description;
+        if (!desc) {
+            try { desc = (await import('../../../power-user.js')).power_user?.persona_description; } catch (e) { dlog('persona text: ' + (e?.message || e)); }
+        }
+        return { person: ctx.name1 || 'User', text: String(desc || '') };
+    }
+    const ch = ctx.characters?.[ctx.characterId];
+    const text = [ch?.description, ch?.personality, ch?.scenario, ch?.first_mes].filter(Boolean).join('\n');
+    return { person: ch?.name || ctx.name2 || 'Character', text };
+}
+
+/** Find the birthday in the bot's or the persona's card: text search first (free), then the AI. Always asks before adding. */
+async function findBirthday(role) {
+    const cal = calendar(P());
+    const np = nowParts();
+    const src = await cardText(role);
+    if (!src.text.trim()) { window.toastr?.warning(t('bd_card_empty', t('role_' + role))); return null; }
+    const found = localBirthday(src.text, cal) || await aiFindBirthday(src, role, cal);
+    if (!found) { window.toastr?.info(t('bd_none_found', src.person)); return null; }
+    let birthYear = found.birthYear ?? null;
+    if (birthYear == null && found.age != null) { // derive the year of birth from the stated age
+        const passed = toDay(cal, np.y, found.m, found.d) <= np.day;
+        birthYear = np.y - found.age - (passed ? 0 : 1);
+    }
+    if (birthYear != null && birthYear > np.y) birthYear = null;
+    const label = `${fmtMD(cal, found.m, found.d)}${birthYear != null ? `, ${t('bd_born', birthYear)}` : ''}`;
+    if (!confirm(t('bd_confirm', src.person, t('role_' + role), label, found.evidence))) return null;
+    const r = addBirthday({ person: src.person, role, month: found.m, day: found.d, birthYear, source: 'card' });
+    window.toastr?.success(t(r === 'added' ? 'bd_added' : 'bd_updated', src.person));
+    return null;
+}
+
+function viewBirthdays() {
+    const np = nowParts();
+    const cal = np.cal;
+    if (ui.bdEditing) return viewBirthdayEditor(cal);
+    const ctx = getContext();
+    const list = holidays().filter((h) => h.kind === 'birthday')
+        .map((h) => { const serial = occurrence(cal, h, np.day); return { h, delta: serial - np.day, serial }; })
+        .sort((a, b) => a.serial - b.serial);
+    const dis = ui.busy ? 'disabled' : '';
+    let html = `<div class="hf-card"><div class="hf-h"><i class="fa-solid fa-cake-candles"></i> ${t('bd_h')}</div><div class="hf-sub">${t('bd_hint')}</div>
+        <div class="hf-actions">
+            <button class="hf-btn primary" data-hf="bd-find" data-role="bot" ${dis}><i class="fa-solid fa-id-card"></i> ${t('bd_find_bot')}</button>
+            <button class="hf-btn primary" data-hf="bd-find" data-role="persona" ${dis}><i class="fa-solid fa-user"></i> ${t('bd_find_persona')}</button></div>
+        <div class="hf-sub">${esc(defaultPerson('bot') || '—')} · ${esc(defaultPerson('persona') || '—')}</div>
+        <div class="hf-sub" style="margin-top:10px">${t('bd_add_h')}</div>
+        <div class="hf-actions">
+            <button class="hf-btn" data-hf="bd-add" data-role="bot"><i class="fa-solid fa-plus"></i> ${t('bd_add_bot')}</button>
+            <button class="hf-btn" data-hf="bd-add" data-role="persona"><i class="fa-solid fa-plus"></i> ${t('bd_add_persona')}</button>
+            <button class="hf-btn" data-hf="bd-add" data-role="npc"><i class="fa-solid fa-plus"></i> ${t('bd_add_npc')}</button></div></div>`;
+    if (!list.length) return html + `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-cake-candles"></i></div><p>${t('bd_empty')}</p></div>`;
+    html += list.map(({ h, delta }) => {
+        const passed = h.birthYear != null ? toDay(cal, np.y, h.month, h.day) <= np.day : false;
+        const ageNow = h.birthYear != null ? np.y - h.birthYear - (passed ? 0 : 1) : null;
+        return `<div class="hf-card hf-bdrow" style="--c:${TYPES.personal.color}">
+            <div class="hf-row"><div class="hf-ico">${hIcon(h)}</div>
+                <div class="hf-grow"><div class="hf-name">${esc(h.person)} <span class="hf-badge">${esc(t('role_' + (h.role || 'npc')))}</span>${h.hidden ? ` <span class="hf-badge">${t('hidden')}</span>` : ''}</div>
+                <div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))}${h.birthYear != null ? ` · ${t('bd_born', h.birthYear)}` : ''}${ageNow != null && ageNow > 0 ? ` · ${t('bd_age_now', ageNow)}` : ''} · ${srcLabel(h)}</div></div>
+                <div class="hf-when ${delta === 0 ? 'now' : ''}">${whenLabel(delta)}</div></div>
+            <div class="hf-actions"><button class="hf-btn small" data-hf="edit" data-id="${h.id}">${t('edit')}</button>
+                <button class="hf-btn small" data-hf="hide" data-id="${h.id}">${h.hidden ? t('show') : t('hide')}</button>
+                <button class="hf-btn small danger" data-hf="del" data-id="${h.id}">${t('del')}</button></div></div>`;
+    }).join('');
+    return html;
+}
+
+function viewBirthdayEditor(cal) {
+    const ex = ui.bdEditing === 'new' ? null : holidays().find((x) => x.id === ui.bdEditing);
+    const d = ex || { person: '', role: 'npc', month: 1, day: 1, birthYear: null, ...(ui.bdDraft || {}) };
+    const auto = !ex && ui.bdDraft?.auto ? '1' : '0';
+    return `<div class="hf-card"><div class="hf-h"><i class="fa-solid fa-cake-candles"></i> ${ex ? t('bd_edit') : t('bd_new')}</div>
+        <label>${t('bd_role')}<select class="text_pole" id="hf_bd_role">${['bot', 'persona', 'npc'].map((r) => `<option value="${r}" ${d.role === r ? 'selected' : ''}>${esc(t('role_' + r))}</option>`).join('')}</select></label>
+        <label>${t('bd_person')}<input class="text_pole" id="hf_bd_person" data-auto="${auto}" value="${esc(d.person)}"></label>
+        <div class="hf-grid">
+            <label>${t('month')}<select class="text_pole" id="hf_bd_month">${cal.map((m, i) => `<option value="${i + 1}" ${+d.month === i + 1 ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+            <label>${t('day')}<input class="text_pole" type="number" id="hf_bd_day" min="1" value="${d.day}"></label>
+            <label>${t('bd_year')}<input class="text_pole" type="number" id="hf_bd_year" value="${d.birthYear ?? ''}"></label></div>
+        <div class="hf-actions"><button class="hf-btn primary" data-hf="bd-save">${t('save')}</button><button class="hf-btn" data-hf="bd-cancel">${t('cancel')}</button></div></div>`;
+}
+
 function weekdayNames() {
     try {
         const f = new Intl.DateTimeFormat(lang(), { weekday: 'short', timeZone: 'UTC' });
@@ -1426,7 +1619,7 @@ function viewCalendar() {
         const hs = holidaysOn(cal, y, m, ui.calSel);
         html += `<div class="hf-card"><div class="hf-h">${esc(fmtDate(cal, y, m, ui.calSel))}</div>`;
         html += hs.length ? hs.map((h) => `<div class="hf-calitem" style="--c:${TYPES[h.type]?.color}">
-            <div class="hf-row"><div class="hf-ico">${hIcon(h)}</div><div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(h.description)}</div></div>${typeChip(h.type)}</div>
+            <div class="hf-row"><div class="hf-ico">${hIcon(h)}</div><div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(descOf(h, y))}</div></div>${typeChip(h.type)}</div>
             <label class="checkbox_label"><input type="checkbox" data-hf="celebrate-y" data-id="${h.id}" data-y="${y}" ${celebratedIn(h, y) ? 'checked' : ''}><span>${t('cal_celebrated', y)}</span></label>
             <button class="hf-btn small" data-hf="edit" data-id="${h.id}">${t('edit')}</button></div>`).join('') : `<div class="hf-sub">${t('cal_none_day')}</div>`;
         html += `<div class="hf-actions"><button class="hf-btn small" data-hf="cal-add"><i class="fa-solid fa-plus"></i> ${t('cal_add')}</button></div></div>`;
@@ -1586,7 +1779,7 @@ function updateProgress() {
     if (lab) lab.textContent = `${t('busy')} ${p.done}/${p.total}`;
 }
 
-const TABS = [['overview', '<i class="fa-solid fa-house"></i>'], ['holidays', '<i class="fa-solid fa-gift"></i>'], ['calendar', '<i class="fa-solid fa-calendar-days"></i>'], ['history', '<i class="fa-solid fa-scroll"></i>'], ['profiles', '<i class="fa-solid fa-earth-europe"></i>'], ['settings', '<i class="fa-solid fa-gear"></i>']];
+const TABS = [['overview', '<i class="fa-solid fa-house"></i>'], ['holidays', '<i class="fa-solid fa-gift"></i>'], ['birthdays', '<i class="fa-solid fa-cake-candles"></i>'], ['calendar', '<i class="fa-solid fa-calendar-days"></i>'], ['history', '<i class="fa-solid fa-scroll"></i>'], ['profiles', '<i class="fa-solid fa-earth-europe"></i>'], ['settings', '<i class="fa-solid fa-gear"></i>']];
 
 function renderBody() {
     try {
@@ -1606,7 +1799,7 @@ function renderBodyInner() {
     if (!hasChat() || !C()) {
         body.innerHTML = `<div class="hf-empty"><div class="hf-bigico"><i class="fa-solid fa-comment"></i></div><p>${t('open_chat')}</p></div>`;
     } else {
-        const views = { overview: viewOverview, holidays: viewHolidays, calendar: viewCalendar, history: viewHistory, profiles: viewProfiles, settings: viewSettings };
+        const views = { overview: viewOverview, holidays: viewHolidays, birthdays: viewBirthdays, calendar: viewCalendar, history: viewHistory, profiles: viewProfiles, settings: viewSettings };
         body.innerHTML = busyBanner() + views[ui.tab]();
     }
     body.scrollTop = scroll;
@@ -1672,7 +1865,7 @@ function trackerHtml() {
         </summary>
         <div class="hf-tr-body">
             <div class="hf-tr-meta">${typeChip(h.type)}${h.tone ? `<span>${esc(h.tone)}</span>` : ''}</div>
-            ${h.description ? `<div class="hf-tr-desc">${esc(h.description)}</div>` : ''}
+            ${descOf(h, focus.year) ? `<div class="hf-tr-desc">${esc(descOf(h, focus.year))}</div>` : ''}
             ${h.traditions ? `<div class="hf-tr-desc"><b>${t('traditions')}:</b> ${esc(h.traditions)}</div>` : ''}
             ${todays.length > 1 ? `<div class="hf-tr-list-h">${t('tr_also')}</div>${todays.slice(1).map(row).join('')}` : ''}
             ${others.length ? `<div class="hf-tr-list-h">${t('tr_closest')}</div>${others.map(row).join('')}` : ''}
@@ -1738,7 +1931,7 @@ function toastToday() {
     if (x && st.toastKey !== key) {
         st.toastKey = key;
         saveChat();
-        window.toastr?.info(`${x.h.name} — ${x.h.description}`.slice(0, 160), t('t_today'));
+        window.toastr?.info(`${x.h.name} — ${descOf(x.h, x.year)}`.slice(0, 160), t('t_today'));
     }
 }
 
@@ -1824,7 +2017,8 @@ function importHolidayList(list, memory, mode) {
                 id: uid(), name: String(raw.name).trim(), month, day: dClamp(cal, month, raw.day), year: Number.isNaN(yr) ? null : yr,
                 repeat: raw.repeat !== false, type: TYPES[raw.type] ? raw.type : 'cultural', description: String(raw.description || ''),
                 traditions: String(raw.traditions || ''), tone: String(raw.tone || ''), icon: iconKey(raw.icon),
-                source: ['manual', 'generated', 'lorebook', 'chat'].includes(raw.source) ? raw.source : 'manual', hidden: !!raw.hidden,
+                source: ['manual', 'generated', 'lorebook', 'chat', 'card'].includes(raw.source) ? raw.source : 'manual', hidden: !!raw.hidden,
+                ...(raw.kind === 'birthday' ? { kind: 'birthday', person: String(raw.person || ''), role: ['bot', 'persona', 'npc'].includes(raw.role) ? raw.role : 'npc', birthYear: Number.isNaN(parseInt(raw.birthYear, 10)) ? null : parseInt(raw.birthYear, 10) } : {}),
             };
             st.holidays.push(target);
             byName.set(key, target);
@@ -1946,6 +2140,29 @@ const actions = {
         toastToday();
         window.toastr?.success(t('t_date_set', res.label));
     },
+    'bd-find': (el) => runBusy(() => findBirthday(el.dataset.role), 't_nothing'),
+    'bd-add': (el) => { ui.bdEditing = 'new'; ui.bdDraft = { role: el.dataset.role, person: defaultPerson(el.dataset.role), auto: true }; renderBody(); },
+    'bd-cancel': () => { ui.bdEditing = null; ui.bdDraft = null; renderBody(); },
+    'bd-save': () => {
+        const cal = nowParts().cal;
+        const v = (id) => document.getElementById(id)?.value.trim() ?? '';
+        const person = v('hf_bd_person');
+        if (!person) return window.toastr?.warning(t('bd_need_name'));
+        const role = ['bot', 'persona', 'npc'].includes(v('hf_bd_role')) ? v('hf_bd_role') : 'npc';
+        const month = mIdx(cal, v('hf_bd_month'));
+        const by = parseInt(v('hf_bd_year'), 10);
+        const data = { person, role, month, day: dClamp(cal, month, v('hf_bd_day')), birthYear: Number.isNaN(by) ? null : by };
+        if (ui.bdEditing === 'new') {
+            window.toastr?.success(t(addBirthday({ ...data, source: 'manual' }) === 'added' ? 'bd_added' : 'bd_updated', person));
+        } else {
+            const h = holidays().find((x) => x.id === ui.bdEditing);
+            if (h) { Object.assign(h, data, { name: t('bd_title', person) }); saveChat(); }
+        }
+        ui.bdEditing = null;
+        ui.bdDraft = null;
+        scanChat();
+        refreshAll();
+    },
     'lore-world': () => runBusy(() => buildWorldFromLore(ui.fdHol, ui.fdMode), 't_lore_none'),
     'fandom-build': () => {
         const name = document.getElementById('hf_fd_name')?.value.trim() ?? ui.fdName;
@@ -1967,7 +2184,13 @@ const actions = {
     },
     cancel: () => cancelBusy(),
     add: () => { ui.editing = 'new'; ui.editIcon = ''; renderBody(); },
-    edit: (el) => { ui.editing = el.dataset.id; ui.editIcon = holidays().find((x) => x.id === el.dataset.id)?.icon || ''; renderBody(); },
+    edit: (el) => {
+        const h = holidays().find((x) => x.id === el.dataset.id);
+        if (h?.kind === 'birthday') { ui.tab = 'birthdays'; ui.bdEditing = h.id; ui.bdDraft = null; renderBody(); return; }
+        ui.editing = el.dataset.id;
+        ui.editIcon = h?.icon || '';
+        renderBody();
+    },
     'pick-icon': (el) => {
         ui.editIcon = el.dataset.icon;
         el.parentElement.querySelectorAll('.hf-ip').forEach((b) => b.classList.toggle('on', b === el));
@@ -2141,6 +2364,12 @@ function buildPanel() {
         if (el.id === 'hf_fd_hol') { ui.fdHol = el.checked; return; }
         if (el.id === 'hf_lw_mode') { ui.fdMode = el.value; return; }
         if (el.id === 'hf_lw_hol') { ui.fdHol = el.checked; return; }
+        if (el.id === 'hf_bd_role') {
+            const pe = document.getElementById('hf_bd_person');
+            if (pe && (!pe.value.trim() || pe.dataset.auto === '1')) { pe.value = defaultPerson(el.value); pe.dataset.auto = pe.value ? '1' : '0'; }
+            return;
+        }
+        if (el.id === 'hf_bd_person') { el.dataset.auto = '0'; return; }
         if (el.dataset.p) {
             P()[el.dataset.p] = el.value;
             saveSettingsDebounced();
