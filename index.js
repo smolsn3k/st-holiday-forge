@@ -1,4 +1,4 @@
-// Holiday Forge v1.12.1 — SillyTavern extension
+// Holiday Forge v1.13 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -19,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.12.1';
+const VERSION = '1.13.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -133,6 +133,7 @@ const DEFAULTS = {
     dateFollow: 'local',
     dateAiEvery: 10,
     horaeSync: true,
+    dateTags: 'RP_DATE, STORY_DATE',
     topLayer: false,
     loreMode: 'active',
     loreBooks: [],
@@ -211,7 +212,10 @@ const L = {
         bd_added: (p) => `Birthday added: ${p}`, bd_updated: (p) => `Birthday updated: ${p}`, src_card: '<i class="fa-solid fa-id-card"></i> card',
         hr_ok: (l) => `Understood as: ${l}`, hr_bad: 'Could not read this as a date. Copy the Diagnostics and send them to the developer so this format can be added.',
         hr_sync: 'Sync with Horae now', hr_synced: 'Date updated from Horae', hr_same: 'The date already matches Horae',
-        hr_opt: 'Follow the Horae extension’s date when Horae is active', hr_none: 'Horae: not detected', hr_disabled: (v) => `Horae ${v}: installed but switched off`,
+        hr_opt: 'Follow Horae and the date tags in messages (RP_DATE)',
+        tg_names: 'Date tag names (comma separated)', tg_none: 'No date tag found in the recent messages.',
+        tg_found: (l, ago) => `Date tag found (${ago} message${ago === 1 ? '' : 's'} back): ${l}`, ds_tag: 'from date tag',
+        hr_opt_old: 'Follow the Horae extension’s date when Horae is active', hr_none: 'Horae: not detected', hr_disabled: (v) => `Horae ${v}: installed but switched off`,
         hr_found: (v, d) => `Horae ${v} is active. Its current date: ${d}`, hr_hint: 'Horae keeps its own story timeline. When it is active, Holiday Forge takes the date and time from it (it has priority over reading the chat text) and falls back to the chat only if Horae has no readable date.',
         ds_horae: 'synced with Horae', ds_chat: 'from chat', ds_manual: 'manual',
         df_opt: 'Follow the date in the chat', df_off: 'off (set the date manually)', df_local: 'automatic, free (reads dates in recent messages)', df_ai: 'automatic + AI check every N messages',
@@ -313,7 +317,10 @@ const L = {
         bd_added: (p) => `День рождения добавлен: ${p}`, bd_updated: (p) => `День рождения обновлён: ${p}`, src_card: '<i class="fa-solid fa-id-card"></i> карточка',
         hr_ok: (l) => `Распознано как: ${l}`, hr_bad: 'Не удалось прочитать это как дату. Скопируйте диагностику и отправьте разработчику, чтобы добавить этот формат.',
         hr_sync: 'Синхронизировать с Horae сейчас', hr_synced: 'Дата обновлена из Horae', hr_same: 'Дата уже совпадает с Horae',
-        hr_opt: 'Следовать за датой расширения Horae, если Horae активно', hr_none: 'Horae: не найдено', hr_disabled: (v) => `Horae ${v}: установлено, но выключено`,
+        hr_opt: 'Следовать за Horae и тегами даты в сообщениях (RP_DATE)',
+        tg_names: 'Названия тегов даты (через запятую)', tg_none: 'В последних сообщениях тег даты не найден.',
+        tg_found: (l, ago) => `Тег даты найден (сообщений назад: ${ago}): ${l}`, ds_tag: 'по тегу даты',
+        hr_opt_old: 'Следовать за датой расширения Horae, если Horae активно', hr_none: 'Horae: не найдено', hr_disabled: (v) => `Horae ${v}: установлено, но выключено`,
         hr_found: (v, d) => `Horae ${v} активно. Текущая дата в нём: ${d}`, hr_hint: 'Horae ведёт свою временную шкалу истории. Когда оно активно, Holiday Forge берёт дату и время из него (приоритет выше, чем у чтения текста чата) и возвращается к чату, только если у Horae нет понятной даты.',
         ds_horae: 'синхронно с Horae', ds_chat: 'из чата', ds_manual: 'вручную',
         df_opt: 'Следовать за датой в чате', df_off: 'выкл. (дату ставлю вручную)', df_local: 'автоматически, бесплатно (читает даты в последних сообщениях)', df_ai: 'автоматически + проверка ИИ каждые N сообщений',
@@ -1749,6 +1756,8 @@ function viewSettings() {
             ${num('flow', t('flow'), 0, 1440)}
             ${sel('dateFollow', t('df_opt'), [['off', t('df_off')], ['local', t('df_local')], ['ai', t('df_ai')]])}
             ${chk('horaeSync', t('hr_opt'))}
+            <label>${t('tg_names')}<input class="text_pole" data-set="dateTags" value="${esc(s.dateTags)}"></label>
+            ${tagStatusHtml()}
             ${horaeStatusHtml()}
             <div class="hf-sub">${t('hr_hint')}</div>
             ${num('dateAiEvery', t('df_every'), 2, 200)}
@@ -2145,7 +2154,7 @@ const actions = {
         window.toastr?.success(t('t_date_set', res.label));
     },
     'horae-sync': () => {
-        const r = followHorae(true);
+        const r = followAny(true, false);
         if (r === 'applied') { refreshAll(); toastToday(); window.toastr?.success(t('hr_synced')); }
         else if (r === 'same') window.toastr?.info(t('hr_same'));
         else window.toastr?.warning(t('hr_bad'));
@@ -2644,6 +2653,7 @@ async function collectDiag(withTest) {
         };
     }));
     if (withTest) add('openTest', await testOpen());
+    add('tags', safe(() => { const f = latestTag(); return { setting: S().dateTags, found: f ? { raw: f.hit.raw, parsed: { y: f.hit.y, m: f.hit.m, d: f.hit.d, h: f.hit.h, min: f.hit.min }, messagesBack: f.ago } : null, source: ui.dateSource }; }));
     add('horae', safe(() => {
         const H = globalThis.Horae;
         if (!H) return { present: false };
@@ -2713,8 +2723,8 @@ function dateMatchers(cal) {
         return null;
     };
     r = {
-        A: new RegExp(`(?<!\\d)(\\d{1,2})(?:st|nd|rd|th|-?(?:го|е))?\\.?\\s*(?:of\\s+)?(${M})\\.?(?:\\s*,?\\s*(\\d{3,4})(?!\\d))?`, 'giu'),
-        B: new RegExp(`(${M})\\.?\\s+(\\d{1,2})(?!\\d)(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{3,4})(?!\\d))?`, 'giu'),
+        A: new RegExp(`(?<!\\d)(\\d{1,2})(?:st|nd|rd|th|-?(?:го|е))?\\.?\\s*(?:of\\s+)?(${M})\\.?(?:\\s*,?\\s*(\\d{3,4})(?![\\d\\p{L}]))?`, 'giu'),
+        B: new RegExp(`(${M})\\.?\\s+(\\d{1,2})(?!\\d)(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{3,4})(?![\\d\\p{L}]))?`, 'giu'),
         C: /(?<!\d)(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?!\d)/g,
         ISO: /(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)/g,
         T: /(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)(?:\s*([ap]\.?m\.?))?/gi,
@@ -2920,12 +2930,89 @@ function followHorae(force = false) {
     return 'applied';
 }
 
-/** Horae first (structured, authoritative). The chat-text reader is only a fallback when Horae has no date text at all,
- *  so a date mentioned in the story can never override a date Horae has but we cannot read. */
-function followAny(initial = false) {
+/** Hidden date tags that bots/presets/Horae put into messages, e.g. <!-- [RP_DATE:16 November 2026 10:05] -->. */
+const tagRxCache = new Map();
+function tagRegex() {
+    const names = String(S().dateTags || 'RP_DATE').split(',').map((x) => x.trim()).filter(Boolean);
+    const key = names.join('|');
+    let rx = tagRxCache.get(key);
+    if (!rx) {
+        rx = new RegExp(`(?:${names.map(reEsc).join('|')})\\s*[:：=]\\s*(.+?)\\s*(?:\\]|-->|[\\r\\n]|$)`, 'gi');
+        tagRxCache.set(key, rx);
+    }
+    rx.lastIndex = 0;
+    return rx;
+}
+
+/** The last readable date tag in a message (also a <horae>…time:…</horae> block). Works on the raw text, so hidden comments are seen. */
+function tagDate(text, cal) {
+    if (!text) return null;
+    const str = String(text);
+    let found = null;
+    for (const x of str.matchAll(tagRegex())) {
+        const hit = parseHoraeDate({ date: x[1], time: '', abs: '' }, cal);
+        if (hit) found = { ...hit, raw: x[1].trim() };
+    }
+    if (found) return found;
+    const hb = /<horae>([\s\S]*?)<\/horae>/i.exec(str);
+    if (hb) {
+        const ln = /(?:^|\n)\s*(?:time|timestamp|时间)\s*[:：]\s*(.+)/i.exec(hb[1]);
+        if (ln) {
+            const hit = parseHoraeDate({ date: ln[1], time: '', abs: '' }, cal);
+            if (hit) return { ...hit, raw: ln[1].trim() };
+        }
+    }
+    return null;
+}
+
+function latestTag(limit = 12) {
+    const np = nowParts();
+    const msgs = chatList(getContext().chat);
+    for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - limit); i--) {
+        const hit = tagDate(msgs[i].mes, np.cal);
+        if (hit) return { hit, ago: msgs.length - 1 - i };
+    }
+    return null;
+}
+
+/** 'applied' | 'same' | null. Looks at the newest `limit` messages (hidden ones included). */
+function followTags(limit) {
+    const s = S();
+    if (!s.enabled || !s.horaeSync || !hasChat() || !C()) return null;
+    const f = latestTag(limit);
+    if (!f) return null;
+    const np = nowParts();
+    const { hit } = f;
+    const y = hit.y ?? np.y;
+    const h = hit.h ?? np.h;
+    const min = hit.h !== undefined ? hit.min : np.min;
+    const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
+    ui.dateSource = 'tag';
+    if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
+    storeClock(total);
+    dlog(`date from tag: ${y}-${hit.m}-${hit.d} ${h}:${pad2(min)} ("${hit.raw}")`);
+    return 'applied';
+}
+
+function tagStatusHtml() {
+    const f = latestTag();
+    if (!f) return `<div class="hf-sub">${t('tg_none')}</div>`;
+    const np = nowParts();
+    const label = `${fmtDate(np.cal, f.hit.y ?? np.y, f.hit.m, f.hit.d)}${f.hit.h !== undefined ? `, ${pad2(f.hit.h)}:${pad2(f.hit.min)}` : ''}`;
+    return `<div class="hf-sub hf-mono">“${esc(f.hit.raw)}”</div><div class="hf-sub">${t('tg_found', label, f.ago)}</div>`;
+}
+
+/** Order of trust: an explicit date tag in the newest messages, then Horae's own state, then older tags, then (optionally) free text in the chat.
+ *  A date that Horae has but we cannot read is never overridden by free text. withText=false is used by background re-checks. */
+function followAny(initial = false, withText = true) {
+    const t1 = followTags(3);
+    if (t1) return t1;
     const h = followHorae(initial);
-    if (h) return h;
-    return followDate(initial);
+    if (h && h !== 'unreadable') return h;
+    const t2 = followTags(40);
+    if (t2) return t2;
+    if (h === 'unreadable') return h;
+    return withText ? followDate(initial) : null;
 }
 
 /** What the settings page shows: Horae's raw date text and how we understood it. */
@@ -2949,7 +3036,7 @@ function horaeStatusHtml() {
 let horaeTimer = null;
 function scheduleHoraeRecheck(ms = 3500) {
     clearTimeout(horaeTimer); // Horae may finish analysing the message a bit later
-    horaeTimer = setTimeout(() => { if (followHorae() === 'applied') { refreshAll(); toastToday(); } }, ms);
+    horaeTimer = setTimeout(() => { if (followAny(false, false) === 'applied') { refreshAll(); toastToday(); } }, ms);
 }
 
 let followTimer = null, aiCounter = 0, aiDateBusy = false;
@@ -3055,7 +3142,7 @@ jQuery(async () => {
         try { es.on('horae:settingsChanged', () => { if (followHorae(true) === 'applied') { refreshAll(); toastToday(); } if (ui.open) renderBody(); }); } catch { /* Horae not installed */ }
         setInterval(() => { // safety net in case Horae finishes after our checks
             if (document.hidden || !S().horaeSync || !globalThis.Horae) return;
-            if (followHorae() === 'applied') { refreshAll(); toastToday(); }
+            if (followAny(false, false) === 'applied') { refreshAll(); toastToday(); }
         }, 4000);
         on('GENERATION_STARTED', (type, _params, dryRun) => {
             if (type === 'quiet' || dryRun) return applyInjection();
