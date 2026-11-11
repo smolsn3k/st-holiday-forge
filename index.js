@@ -1,4 +1,4 @@
-// Holiday Forge v1.13 — SillyTavern extension
+// Holiday Forge v1.13.1 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -19,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -134,6 +134,7 @@ const DEFAULTS = {
     dateAiEvery: 10,
     horaeSync: true,
     dateTags: 'RP_DATE, STORY_DATE',
+    datePriority: 'horae',
     topLayer: false,
     loreMode: 'active',
     loreBooks: [],
@@ -152,7 +153,7 @@ const L = {
         type_religious: 'religious', type_cultural: 'cultural', type_seasonal: 'seasonal', type_personal: 'personal',
         style_balanced: 'balanced', style_grounded: 'grounded', style_whimsical: 'whimsical', style_solemn: 'solemn',
         all: 'All', today: 'Today', tomorrow: 'Tomorrow', in_days: (n) => `in ${n}d`,
-        u_days: 'days', u_hours: 'hours', u_min: 'min', s_d: 'd', s_h: 'h',
+        u_days: 'days', u_hours: 'hours', u_min: 'min', s_d: 'd', s_h: 'h', s_m: 'm', cd_note: 'exact time until it starts',
         no_holidays: 'No holidays in this chat yet.', gen_first: 'Generate holidays',
         scene_ideas: '<i class="fa-solid fa-lightbulb"></i> Scene ideas', thinking: '<i class="fa-solid fa-hourglass-half"></i> Thinking…', next3: 'Next 3', nothing_upcoming: 'Nothing upcoming.',
         clock: 'In-world date:', day: 'Day', month: 'Month', year: 'Year', hour: 'Hour',
@@ -213,6 +214,7 @@ const L = {
         hr_ok: (l) => `Understood as: ${l}`, hr_bad: 'Could not read this as a date. Copy the Diagnostics and send them to the developer so this format can be added.',
         hr_sync: 'Sync with Horae now', hr_synced: 'Date updated from Horae', hr_same: 'The date already matches Horae',
         hr_opt: 'Follow Horae and the date tags in messages (RP_DATE)',
+        dp_opt: 'If Horae and a date tag disagree', dp_horae: 'trust Horae first, tags as a fallback', dp_tag: 'trust the date tag first, Horae as a fallback',
         tg_names: 'Date tag names (comma separated)', tg_none: 'No date tag found in the recent messages.',
         tg_found: (l, ago) => `Date tag found (${ago} message${ago === 1 ? '' : 's'} back): ${l}`, ds_tag: 'from date tag',
         hr_opt_old: 'Follow the Horae extension’s date when Horae is active', hr_none: 'Horae: not detected', hr_disabled: (v) => `Horae ${v}: installed but switched off`,
@@ -257,7 +259,7 @@ const L = {
         type_religious: 'религиозный', type_cultural: 'культурный', type_seasonal: 'сезонный', type_personal: 'личный',
         style_balanced: 'сбалансированный', style_grounded: 'реалистичный', style_whimsical: 'причудливый', style_solemn: 'торжественный',
         all: 'Все', today: 'Сегодня', tomorrow: 'Завтра', in_days: (n) => `через ${n} дн.`,
-        u_days: 'дней', u_hours: 'часов', u_min: 'мин', s_d: 'д', s_h: 'ч',
+        u_days: 'дней', u_hours: 'часов', u_min: 'мин', s_d: 'д', s_h: 'ч', s_m: 'м', cd_note: 'точное время до начала',
         no_holidays: 'В этом чате пока нет праздников.', gen_first: 'Сгенерировать праздники',
         scene_ideas: '<i class="fa-solid fa-lightbulb"></i> Идеи для сцен', thinking: '<i class="fa-solid fa-hourglass-half"></i> Думаю…', next3: 'Ближайшие 3', nothing_upcoming: 'Ничего не намечается.',
         clock: 'Дата в мире:', day: 'День', month: 'Месяц', year: 'Год', hour: 'Час',
@@ -318,6 +320,7 @@ const L = {
         hr_ok: (l) => `Распознано как: ${l}`, hr_bad: 'Не удалось прочитать это как дату. Скопируйте диагностику и отправьте разработчику, чтобы добавить этот формат.',
         hr_sync: 'Синхронизировать с Horae сейчас', hr_synced: 'Дата обновлена из Horae', hr_same: 'Дата уже совпадает с Horae',
         hr_opt: 'Следовать за Horae и тегами даты в сообщениях (RP_DATE)',
+        dp_opt: 'Если Horae и тег даты расходятся', dp_horae: 'сначала Horae, теги как запасной вариант', dp_tag: 'сначала тег даты, Horae как запасной вариант',
         tg_names: 'Названия тегов даты (через запятую)', tg_none: 'В последних сообщениях тег даты не найден.',
         tg_found: (l, ago) => `Тег даты найден (сообщений назад: ${ago}): ${l}`, ds_tag: 'по тегу даты',
         hr_opt_old: 'Следовать за датой расширения Horae, если Horae активно', hr_none: 'Horae: не найдено', hr_disabled: (v) => `Horae ${v}: установлено, но выключено`,
@@ -1236,8 +1239,11 @@ function cdTiles(totalMin) {
 }
 
 function inlineCd(mins) {
-    const m = Math.max(0, mins);
-    return `${Math.floor(m / 1440)}${t('s_d')} ${Math.floor((m % 1440) / 60)}${t('s_h')}`;
+    const m = Math.max(0, Math.floor(mins));
+    const days = Math.ceil(m / 1440); // equals the calendar-day distance, like "in 5d" in the lists
+    if (days >= 2) return `${days}${t('s_d')}`;
+    const h = Math.floor(m / 60);
+    return h > 0 ? `${h}${t('s_h')} ${m % 60}${t('s_m')}` : `${m}${t('s_m')}`;
 }
 
 function whenLabel(delta) {
@@ -1302,6 +1308,7 @@ function viewOverview() {
                 <div class="hf-hero-top">${typeChip(next.h.type)}<span class="hf-sub">${esc(fmtMD(np.cal, next.h.month, next.h.day))}</span></div>
                 <div class="hf-hero-name">${esc(next.h.name)}</div>
                 <div class="hf-cd" data-serial="${next.serial}">${cdTiles(next.mins)}</div>
+                <div class="hf-sub">${t('cd_note')}</div>
                 <div class="hf-sub">${esc(descOf(next.h, next.year))}</div>
                 <button class="hf-btn small" data-hf="ideas" data-id="${next.h.id}">${t('scene_ideas')}</button>
                 <div class="hf-ideas">${esc(ui.ideas[next.h.id] || '')}</div></div>`;
@@ -1309,7 +1316,7 @@ function viewOverview() {
         html += `<div class="hf-h">${t('next3')}</div><div class="hf-card">${list.slice(0, 3).map((x) => miniRow(x, np.cal)).join('') || `<div class="hf-sub">${esc(nextYearHint())}</div>`}</div>`;
     }
     const monthOpts = np.cal.map((m, i) => `<option value="${i + 1}" ${i + 1 === np.m ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
-    html += `<details class="hf-card hf-clock"><summary><i class="fa-solid fa-clock"></i> ${t('clock')} <b>&nbsp;${esc(fmtDate(np.cal, np.y, np.m, np.d))}</b>, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')} <span class="hf-badge" style="margin-left:8px">${t('ds_' + ui.dateSource)}</span></summary>
+    html += `<details class="hf-card hf-clock"><summary><i class="fa-solid fa-clock"></i><span class="hf-clock-line">${t('clock')} <b>${esc(fmtDate(np.cal, np.y, np.m, np.d))}, ${String(np.h).padStart(2, '0')}:${String(np.min).padStart(2, '0')}</b></span><span class="hf-badge">${t('ds_' + ui.dateSource)}</span></summary>
         <div class="hf-grid">
             <label>${t('day')}<input class="text_pole" type="number" id="hf_cd_d" value="${np.d}" min="1"></label>
             <label>${t('month')}<select class="text_pole" id="hf_cd_m">${monthOpts}</select></label>
@@ -1756,6 +1763,7 @@ function viewSettings() {
             ${num('flow', t('flow'), 0, 1440)}
             ${sel('dateFollow', t('df_opt'), [['off', t('df_off')], ['local', t('df_local')], ['ai', t('df_ai')]])}
             ${chk('horaeSync', t('hr_opt'))}
+            ${sel('datePriority', t('dp_opt'), [['horae', t('dp_horae')], ['tag', t('dp_tag')]])}
             <label>${t('tg_names')}<input class="text_pole" data-set="dateTags" value="${esc(s.dateTags)}"></label>
             ${tagStatusHtml()}
             ${horaeStatusHtml()}
@@ -1847,12 +1855,12 @@ function renderStrip() {
 /* ----------------------------------------------- tracker inside chat messages */
 
 function ringInner(mins) {
-    const days = Math.floor(Math.max(0, mins) / 1440);
-    const hrs = Math.floor((Math.max(0, mins) % 1440) / 60);
+    const m = Math.max(0, Math.floor(mins));
+    const days = Math.ceil(m / 1440);
     const R = 15.5;
     const CIRC = 2 * Math.PI * R;
     const prog = mins <= 0 ? 1 : clamp(1 - days / 60, 0.05, 1);
-    const label = mins <= 0 ? '<i class="fa-solid fa-champagne-glasses"></i>' : days >= 1 ? `${days}` : `${hrs}${t('s_h')}`;
+    const label = mins <= 0 ? '<i class="fa-solid fa-champagne-glasses"></i>' : days >= 2 ? `${days}` : m >= 60 ? `${Math.floor(m / 60)}${t('s_h')}` : `${m}${t('s_m')}`;
     return `<svg viewBox="0 0 40 40" aria-hidden="true"><circle class="hf-ring-bg" cx="20" cy="20" r="${R}"/><circle class="hf-ring-fg" cx="20" cy="20" r="${R}" stroke-dasharray="${(CIRC * prog).toFixed(1)} ${CIRC.toFixed(1)}" transform="rotate(-90 20 20)"/></svg><b>${label}</b>`;
 }
 
@@ -2797,7 +2805,7 @@ function followDate(initial = false) {
         const h = hit.h ?? np.h;
         const min = hit.h !== undefined ? hit.min : np.min;
         const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
-        if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
+        if (total === clockMinutes(false)) return 'same';
         ui.dateSource = 'chat';
         storeClock(total);
         dlog(`date from chat: ${y}-${hit.m}-${hit.d} ${h}:${String(min).padStart(2, '0')}`);
@@ -2906,7 +2914,7 @@ function followHorae(force = false) {
     const np = nowParts();
     const sig = `${chatIdNow()}|${r.date}|${r.time}|${r.abs}`;
     if (!force && sig === horaeSig) {
-        if (horaeOk) { ui.dateSource = 'horae'; return 'same'; }
+        if (horaeOk) return 'same'; // nothing new from Horae: leave the clock alone (a manual change stays)
         return r.date || r.abs ? 'unreadable' : null;
     }
     let hit = parseHoraeDate(r, np.cal);
@@ -2924,8 +2932,8 @@ function followHorae(force = false) {
     const h = hit.h ?? np.h;
     const min = hit.h !== undefined ? hit.min : np.min;
     const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
+    if (total === clockMinutes(false)) { if (force) ui.dateSource = 'horae'; return 'same'; }
     ui.dateSource = 'horae';
-    if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
     storeClock(total);
     return 'applied';
 }
@@ -2970,25 +2978,31 @@ function latestTag(limit = 12) {
     const msgs = chatList(getContext().chat);
     for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - limit); i--) {
         const hit = tagDate(msgs[i].mes, np.cal);
-        if (hit) return { hit, ago: msgs.length - 1 - i };
+        if (hit) return { hit, ago: msgs.length - 1 - i, idx: i };
     }
     return null;
 }
 
-/** 'applied' | 'same' | null. Looks at the newest `limit` messages (hidden ones included). */
-function followTags(limit) {
+let tagSig = '';
+
+/** 'applied' | 'same' | null. Looks at the newest `limit` messages (hidden ones included).
+ *  Like Horae, a tag only moves the clock when it is new or changed, so a manual correction is not undone by the next re-check. */
+function followTags(limit, force = false) {
     const s = S();
     if (!s.enabled || !s.horaeSync || !hasChat() || !C()) return null;
     const f = latestTag(limit);
     if (!f) return null;
+    const sig = `${chatIdNow()}|${f.idx}|${f.hit.raw}`;
+    if (!force && sig === tagSig) return 'same';
+    tagSig = sig;
     const np = nowParts();
     const { hit } = f;
     const y = hit.y ?? np.y;
     const h = hit.h ?? np.h;
     const min = hit.h !== undefined ? hit.min : np.min;
     const total = toDay(np.cal, y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
+    if (total === clockMinutes(false)) { if (force) ui.dateSource = 'tag'; return 'same'; }
     ui.dateSource = 'tag';
-    if (Math.floor(total / 60) === Math.floor(clockMinutes(false) / 60)) return 'same';
     storeClock(total);
     dlog(`date from tag: ${y}-${hit.m}-${hit.d} ${h}:${pad2(min)} ("${hit.raw}")`);
     return 'applied';
@@ -3002,14 +3016,17 @@ function tagStatusHtml() {
     return `<div class="hf-sub hf-mono">“${esc(f.hit.raw)}”</div><div class="hf-sub">${t('tg_found', label, f.ago)}</div>`;
 }
 
-/** Order of trust: an explicit date tag in the newest messages, then Horae's own state, then older tags, then (optionally) free text in the chat.
- *  A date that Horae has but we cannot read is never overridden by free text. withText=false is used by background re-checks. */
+/** Order of trust (Settings: "If Horae and a date tag disagree"): by default Horae's own state first, then date tags in the chat,
+ *  then free text. A date that Horae has but we cannot read is never overridden by free text. withText=false is used by background re-checks. */
 function followAny(initial = false, withText = true) {
-    const t1 = followTags(3);
-    if (t1) return t1;
+    const tagFirst = S().datePriority === 'tag';
+    if (tagFirst) {
+        const t1 = followTags(3, initial);
+        if (t1) return t1;
+    }
     const h = followHorae(initial);
     if (h && h !== 'unreadable') return h;
-    const t2 = followTags(40);
+    const t2 = followTags(40, initial);
     if (t2) return t2;
     if (h === 'unreadable') return h;
     return withText ? followDate(initial) : null;

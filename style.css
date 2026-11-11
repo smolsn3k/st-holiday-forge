@@ -357,3 +357,11 @@ body.hf-lock { overscroll-behavior: contain; }
 .hf-card details summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; color: var(--hf-muted); }
 
 .hf-mono { font-family: ui-monospace, monospace; word-break: break-all; font-size: 0.8em; }
+
+/* ---------- numbers: lining figures (old-style ones sit low and look off-centre in the ring), tidy date line ---------- */
+.hf-ring b, .hf-tile b, .hf-tr-cd, .hf-tr-sub, .hf-when, .hf-cd-inline, .hf-clock-line { font-variant-numeric: lining-nums tabular-nums; font-feature-settings: "lnum" 1; }
+.hf-ring b { display: block; line-height: 1; }
+.hf-clock summary { gap: 10px; flex-wrap: nowrap; }
+.hf-clock summary > i { flex: none; }
+.hf-clock-line { flex: 1; min-width: 0; line-height: 1.35; }
+.hf-clock summary .hf-badge { flex: none; margin-left: 0; white-space: nowrap; }
