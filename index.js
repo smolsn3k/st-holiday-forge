@@ -1,4 +1,4 @@
-// Holiday Forge v1.13.1 — SillyTavern extension
+// Holiday Forge v1.14 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -19,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.13.1';
+const VERSION = '1.14.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -222,6 +222,10 @@ const L = {
         ds_horae: 'synced with Horae', ds_chat: 'from chat', ds_manual: 'manual',
         df_opt: 'Follow the date in the chat', df_off: 'off (set the date manually)', df_local: 'automatic, free (reads dates in recent messages)', df_ai: 'automatic + AI check every N messages',
         df_every: 'AI check every N messages', df_hint: 'Automatic mode reads an explicit date such as “23 December 2026, 18:30” from the first or last lines of the newest messages, or from lines that say date/time. The AI option also asks the model when no date is found (uses extra requests).',
+        lore_none_mode: 'Do not use lorebooks (also skips World Info in the AI requests)', lore_none_note: 'No lorebook text is sent for generation, and SillyTavern’s own World Info and Author’s Note are skipped in Holiday Forge’s AI requests.',
+        lore_count: (n, m) => `Selected: ${n} of ${m}`, lore_clear: 'Clear', lore_all: 'Select all',
+        sel_btn: 'Select', sel_n: (n) => `${n} selected`, sel_all: 'Select all', sel_none: 'None', sel_delete: (n) => `Delete (${n})`, sel_done: 'Done',
+        c_del_many: (n) => `Delete ${n} holiday${n === 1 ? '' : 's'}? This cannot be undone.`, t_deleted: (n) => `Deleted: ${n}`,
         lw_h: 'Build a world from a lorebook', lw_hint: 'Reads the lorebook entries chosen below (the first ~12,000 characters) and fills the profile from them: world, faith, region, calendar and rules. It stays within what the lore says.',
         lw_hol: 'Also create holidays described in (or fitting) the lorebook', lw_btn: 'Build from lorebook',
         fd_h: 'Build a world from a fandom', fd_hint: 'Type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…). The AI fills the profile from what it knows about that world. Check the result, the AI can be wrong about details.',
@@ -328,6 +332,10 @@ const L = {
         ds_horae: 'синхронно с Horae', ds_chat: 'из чата', ds_manual: 'вручную',
         df_opt: 'Следовать за датой в чате', df_off: 'выкл. (дату ставлю вручную)', df_local: 'автоматически, бесплатно (читает даты в последних сообщениях)', df_ai: 'автоматически + проверка ИИ каждые N сообщений',
         df_every: 'Проверка ИИ каждые N сообщений', df_hint: 'Автоматический режим читает явную дату вроде «23 декабря 2026, 18:30» из первых или последних строк новых сообщений, либо из строк со словами «дата/время». Вариант с ИИ дополнительно спрашивает модель, если дата не найдена (это дополнительные запросы).',
+        lore_none_mode: 'Не использовать лорбуки (World Info тоже не попадает в запросы ИИ)', lore_none_note: 'Текст лорбуков не отправляется для генерации, а собственные World Info и Author’s Note SillyTavern пропускаются в запросах Holiday Forge.',
+        lore_count: (n, m) => `Выбрано: ${n} из ${m}`, lore_clear: 'Очистить', lore_all: 'Выбрать все',
+        sel_btn: 'Выбрать', sel_n: (n) => `Выбрано: ${n}`, sel_all: 'Все', sel_none: 'Снять', sel_delete: (n) => `Удалить (${n})`, sel_done: 'Готово',
+        c_del_many: (n) => `Удалить праздников: ${n}? Это нельзя отменить.`, t_deleted: (n) => `Удалено: ${n}`,
         lw_h: 'Создать мир по лорбуку', lw_hint: 'Читает выбранные ниже записи лорбука (первые ~12 000 символов) и заполняет профиль: мир, верования, регион, календарь и правила. ИИ держится того, что написано в лоре.',
         lw_hol: 'Также создать праздники, описанные в лорбуке (или подходящие к нему)', lw_btn: 'Создать по лорбуку',
         fd_h: 'Создать мир по фандому', fd_hint: 'Введите франшизу (Naruto, Аватар: Легенда об Аанге, Гарри Поттер…). ИИ заполнит профиль тем, что знает об этом мире. Проверьте результат: в деталях ИИ может ошибаться.',
@@ -376,7 +384,7 @@ function t(k, ...a) {
 
 /* ------------------------------------------------------------------ state */
 
-const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, dateSource: 'manual', bdEditing: null, bdDraft: null, fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
+const ui = { tab: 'overview', editing: null, editingProfile: null, busy: false, filter: 'all', ideas: {}, open: false, trackerOpen: false, runId: 0, editIcon: '', editDraft: null, importMode: 'merge', importHol: true, dateSource: 'manual', bdEditing: null, bdDraft: null, selMode: false, selected: {}, fdName: '', fdFocus: '', fdMode: 'new', fdHol: true, loreNames: [], calY: null, calM: 1, calSel: null, diagText: '', inline: false, scanning: false, progress: null };
 let runState = null;
 const inj = { text: '' };
 const diagLog = [];
@@ -792,6 +800,7 @@ function profiles() {
 const HOLIDAY_RE = /holiday|festival|feast|celebrat|ritual|ceremon|solstice|equinox|harvest|carnival|fest\b|day of|eve\b|праздн|фестивал|торжеств|ритуал|обряд|церемон|солнцестоян|равноденств|урожа|карнавал|день\s/i;
 
 async function collectLore(opts = {}) {
+    if (S().loreMode === 'none') return { text: '', count: 0, books: [] };
     const ctx = getContext();
     let wi = {};
     try { wi = await import('../../../world-info.js'); } catch (e) { dlog('world-info import failed: ' + (e?.message || e)); }
@@ -865,12 +874,12 @@ async function quiet(prompt, maxTokens = 1800) {
 
     let out = '';
     try {
-        out = await ctx.generateQuietPrompt({ quietPrompt: prompt });
+        out = await ctx.generateQuietPrompt({ quietPrompt: prompt, skipWIAN: S().loreMode === 'none' });
     } catch (e) {
         console.warn('[Holiday Forge] quiet prompt (object form) failed', e);
     }
     if (!out || typeof out !== 'string') {
-        try { out = await ctx.generateQuietPrompt(prompt, false, false); } catch (e) { console.warn('[Holiday Forge] quiet prompt (legacy form) failed', e); }
+        try { out = await ctx.generateQuietPrompt(prompt, false, S().loreMode === 'none'); } catch (e) { console.warn('[Holiday Forge] quiet prompt (legacy form) failed', e); }
     }
     if ((!out || !String(out).trim()) && svc) {
         const sel = ctx.extensionSettings?.connectionManager?.selectedProfile || ES().connectionManager?.selectedProfile;
@@ -968,14 +977,27 @@ async function generate(userPrompt) {
     if (s.useLore) {
         try { lore = (await collectLore()).text; } catch (e) { console.warn('[Holiday Forge] lore', e); }
     }
+    const profileNoRules = profileBlock(p, cal).split('\n').filter((l) => !l.startsWith('- Custom rules')).join('\n');
+    const rules = String(p.rules || '').trim();
+    const realWorld = /real[- ]?world|real life|real holidays|реальн|настоящ/i.test(`${rules} ${p.world || ''}`);
     const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text or dialogue.]
-Invent ${s.count} holidays / celebrations for this roleplay world. Treat the character card, world info and chat so far as the source of truth.
-World profile:
-${profileBlock(p, cal)}
-Style: ${STYLE_PROMPTS[s.style] || STYLE_PROMPTS.balanced}
-User request: ${userPrompt || 'none, use your judgement'}
-Already existing (do not duplicate): ${existing}
-${lore ? `Lorebook excerpts:\n${lore}\n` : ''}${JSON_SHAPE(cal)}`;
+Create ${s.count} holidays and celebrations for the world described below.
+
+WORLD PROFILE
+${profileNoRules}
+
+${rules ? `RULES: binding. Follow every rule literally. They override your own taste, the style hint, and anything in the character card, world info or chat.
+${rules}
+` : ''}
+HOW TO WORK
+- The profile and the rules decide what the holidays are. The character card, world info and chat are background only: never let them pull the holidays away from the profile.
+${realWorld ? '- The setting uses REAL-WORLD holidays: choose holidays that actually exist (national and public holidays, traditional seasonal festivals, worldwide ones such as Christmas, New Year, Halloween, with their real dates), described accurately for this setting. Do not invent substitutes for them.\n' : '- If the profile or rules point to a real country or era, use real holidays of it with their real dates instead of inventing new ones.\n'}- Do not turn every holiday into a feature of the fandom (powers, factions, special abilities, ...). Only do that where the rules explicitly allow it, and then only for a few entries; most should be ordinary for the setting.
+- Give a varied mix (public holidays, seasonal festivals, school or community events, personal observances) that fits the region, era and technology level.
+STYLE: ${STYLE_PROMPTS[s.style] || STYLE_PROMPTS.balanced}
+USER REQUEST: ${userPrompt || 'none, use your judgement within the rules'}
+ALREADY EXISTING (do not duplicate): ${existing}
+${lore ? `LOREBOOK EXCERPTS (background):\n${lore}\n` : ''}
+${JSON_SHAPE(cal)}`;
     const raw = await quiet(prompt);
     return mergeGenerated(normalize(parseJsonList(raw), cal, 'generated'));
 }
@@ -1262,6 +1284,11 @@ async function loadLoreNames() {
     try {
         const wi = await import('../../../world-info.js');
         if (Array.isArray(wi.world_names)) ui.loreNames = [...wi.world_names];
+        const sv = S();
+        if (ui.loreNames.length && Array.isArray(sv.loreBooks)) { // forget books that no longer exist
+            const keep = sv.loreBooks.filter((b) => ui.loreNames.includes(b));
+            if (keep.length !== sv.loreBooks.length) { sv.loreBooks = keep; saveSettingsDebounced(); }
+        }
     } catch (e) { dlog('lore names: ' + (e?.message || e)); }
     if (!ui.loreNames.length && Array.isArray(getContext().worldNames)) ui.loreNames = [...getContext().worldNames];
     if (ui.open && ['holidays', 'settings'].includes(ui.tab) && !ui.editing) renderBody();
@@ -1271,10 +1298,22 @@ function loreSelect() {
     const s = S();
     const names = ui.loreNames || [];
     const books = Array.isArray(s.loreBooks) ? s.loreBooks : [];
-    return `<label>${t('lore_src')}<select class="text_pole" data-set="loreMode">
-        <option value="active" ${s.loreMode !== 'selected' ? 'selected' : ''}>${t('lore_active')}</option>
-        <option value="selected" ${s.loreMode === 'selected' ? 'selected' : ''}>${t('lore_selected')}</option></select></label>
-        ${s.loreMode === 'selected' ? `<div class="hf-lorelist">${names.length ? names.map((n) => `<label class="checkbox_label"><input type="checkbox" data-lore="${esc(n)}" ${books.includes(n) ? 'checked' : ''}><span>${esc(n)}</span></label>`).join('') : `<div class="hf-sub">${t('lore_none')}</div>`}</div>` : ''}`;
+    const picked = names.length ? books.filter((b) => names.includes(b)) : books;
+    const mode = s.loreMode === 'selected' || s.loreMode === 'none' ? s.loreMode : 'active';
+    const opt = (v, label) => `<option value="${v}" ${mode === v ? 'selected' : ''}>${label}</option>`;
+    return `<label>${t('lore_src')}<select class="text_pole" data-set="loreMode">${opt('active', t('lore_active'))}${opt('selected', t('lore_selected'))}${opt('none', t('lore_none_mode'))}</select></label>
+        ${mode === 'none' ? `<div class="hf-sub">${t('lore_none_note')}</div>` : ''}
+        ${mode === 'selected' ? `<div class="hf-loremeta"><b class="hf-lorecount">${t('lore_count', picked.length, names.length)}</b>
+            <span class="hf-lorebtns"><button type="button" class="hf-btn small" data-hf="lore-all">${t('lore_all')}</button>
+            <button type="button" class="hf-btn small" data-hf="lore-clear" ${picked.length ? '' : 'disabled'}>${t('lore_clear')}</button></span></div>
+            <div class="hf-lorelist">${names.length ? names.map((n) => `<label class="checkbox_label"><input type="checkbox" data-lore="${esc(n)}" ${books.includes(n) ? 'checked' : ''}><span>${esc(n)}</span></label>`).join('') : `<div class="hf-sub">${t('lore_none')}</div>`}</div>` : ''}`;
+}
+
+function refreshLoreCount() {
+    const names = ui.loreNames || [];
+    const picked = (S().loreBooks || []).filter((b) => !names.length || names.includes(b)).length;
+    document.querySelectorAll('.hf-lorecount').forEach((el) => { el.textContent = t('lore_count', picked, names.length); });
+    document.querySelectorAll('[data-hf="lore-clear"]').forEach((b) => { b.disabled = !picked; });
 }
 
 function apiSelect() {
@@ -1359,11 +1398,12 @@ function viewHolidays() {
         .filter((h) => ui.filter === 'all' || h.type === ui.filter)
         .sort((a, b) => dayOfYear(cal, a.month, a.day) - dayOfYear(cal, b.month, b.day));
     const dis = ui.busy ? 'disabled' : '';
+    if (ui.selMode) return viewSelection(list, filters, cal);
     return `<div class="hf-card">
             <div class="hf-h">${t('gen_h')}</div>
             <textarea class="text_pole" id="hf_gen_prompt" rows="2" placeholder="${esc(t('gen_ph'))}"></textarea>
             ${apiSelect()}
-            <label class="checkbox_label"><input type="checkbox" data-set="useLore" ${s.useLore ? 'checked' : ''}><span>${t('use_lore')}</span></label>
+            <label class="checkbox_label"><input type="checkbox" data-set="useLore" ${s.useLore ? 'checked' : ''} ${s.loreMode === 'none' ? 'disabled' : ''}><span>${t('use_lore')}</span></label>
             ${loreSelect()}
             <div class="hf-actions">
                 <label class="hf-inline">${t('count')} <input class="text_pole hf-num" type="number" id="hf_gen_count" min="1" max="20" value="${s.count}"></label>
@@ -1378,8 +1418,29 @@ function viewHolidays() {
                 <button class="hf-btn small" data-hf="profile-import"><i class="fa-solid fa-upload"></i> ${t('io_short_imp')}</button>
             </div>
             <input type="file" id="hf_import_file" accept=".json,application/json" hidden></div>
+        ${holidays().length > 1 ? `<div class="hf-actions"><button class="hf-btn small" data-hf="sel-start"><i class="fa-regular fa-square-check"></i> ${t('sel_btn')}</button></div>` : ''}
         <div class="hf-filters">${filters.map((f) => `<button class="hf-pill ${ui.filter === f ? 'on' : ''}" data-hf="filter" data-f="${f}">${f === 'all' ? t('all') : '<i class="fa-solid ' + TYPES[f].fa + '"></i> ' + t('type_' + f)}</button>`).join('')}</div>
         ${list.map((h) => holidayCard(h, cal)).join('') || `<div class="hf-empty"><p>${t('nothing_here')}</p></div>`}`;
+}
+
+function filtersHtml(filters) {
+    return `<div class="hf-filters">${filters.map((f) => `<button class="hf-pill ${ui.filter === f ? 'on' : ''}" data-hf="filter" data-f="${f}">${f === 'all' ? t('all') : '<i class="fa-solid ' + TYPES[f].fa + '"></i> ' + t('type_' + f)}</button>`).join('')}</div>`;
+}
+
+/** Selection mode of the Holidays tab: tap rows to tick them, then delete all ticked at once. */
+function viewSelection(list, filters, cal) {
+    const n = Object.keys(ui.selected).filter((id) => ui.selected[id]).length;
+    const rows = list.map((h) => {
+        const on = !!ui.selected[h.id];
+        return `<div class="hf-selrow ${on ? 'on' : ''}" data-hf="sel-toggle" data-id="${h.id}" style="--c:${TYPES[h.type]?.color}">
+            <i class="${on ? 'fa-solid fa-square-check' : 'fa-regular fa-square'} hf-selbox"></i><div class="hf-ico">${hIcon(h)}</div>
+            <div class="hf-grow"><div class="hf-name">${esc(h.name)}</div><div class="hf-sub">${esc(fmtMD(cal, h.month, h.day))} · ${srcLabel(h)}</div></div>${typeChip(h.type)}</div>`;
+    }).join('');
+    return `<div class="hf-card hf-seltools"><div class="hf-h">${t('sel_n', n)}</div>
+        <div class="hf-actions"><button class="hf-btn small" data-hf="sel-all">${t('sel_all')}</button><button class="hf-btn small" data-hf="sel-none">${t('sel_none')}</button>
+        <button class="hf-btn small danger" data-hf="sel-delete" ${n ? '' : 'disabled'}><i class="fa-solid fa-trash"></i> ${t('sel_delete', n)}</button>
+        <button class="hf-btn small" data-hf="sel-done">${t('sel_done')}</button></div></div>
+        ${filtersHtml(filters)}${rows || `<div class="hf-empty"><p>${t('nothing_here')}</p></div>`}`;
 }
 
 function iconPickerHtml(cur) {
@@ -2128,7 +2189,7 @@ function cancelBusy() {
 const actions = {
     open: () => openPanel(),
     close: () => closePanel(),
-    tab: (el) => { ui.tab = el.dataset.tab; ui.editing = null; renderBody(); if (['holidays', 'settings'].includes(ui.tab)) loadLoreNames(); },
+    tab: (el) => { ui.tab = el.dataset.tab; ui.editing = null; ui.selMode = false; ui.selected = {}; renderBody(); if (['holidays', 'settings'].includes(ui.tab)) loadLoreNames(); },
     goto: (el) => { ui.tab = el.dataset.tab; renderBody(); },
     filter: (el) => { ui.filter = el.dataset.f; renderBody(); },
     generate: () => {
@@ -2191,6 +2252,26 @@ const actions = {
         scanChat();
         refreshAll();
     },
+    'sel-start': () => { ui.selMode = true; ui.selected = {}; renderBody(); },
+    'sel-done': () => { ui.selMode = false; ui.selected = {}; renderBody(); },
+    'sel-toggle': (el) => { ui.selected[el.dataset.id] = !ui.selected[el.dataset.id]; renderBody(); },
+    'sel-none': () => { ui.selected = {}; renderBody(); },
+    'sel-all': () => { holidays().filter((h) => ui.filter === 'all' || h.type === ui.filter).forEach((h) => { ui.selected[h.id] = true; }); renderBody(); },
+    'sel-delete': () => {
+        const ids = Object.keys(ui.selected).filter((id) => ui.selected[id]);
+        if (!ids.length || !confirm(t('c_del_many', ids.length))) return;
+        const st = C();
+        const drop = new Set(ids);
+        st.holidays = st.holidays.filter((h) => !drop.has(h.id));
+        ids.forEach((id) => { delete st.celebrated[id]; delete st.mentions[id]; });
+        saveChat();
+        ui.selMode = false;
+        ui.selected = {};
+        refreshAll();
+        window.toastr?.success(t('t_deleted', ids.length));
+    },
+    'lore-clear': () => { S().loreBooks = []; saveSettingsDebounced(); renderBody(); },
+    'lore-all': () => { S().loreBooks = [...(ui.loreNames || [])]; saveSettingsDebounced(); renderBody(); },
     'lore-world': () => runBusy(() => buildWorldFromLore(ui.fdHol, ui.fdMode), 't_lore_none'),
     'fandom-build': () => {
         const name = document.getElementById('hf_fd_name')?.value.trim() ?? ui.fdName;
@@ -2378,6 +2459,7 @@ function buildPanel() {
             if (el.checked) set.add(el.dataset.lore); else set.delete(el.dataset.lore);
             s.loreBooks = [...set];
             saveSettingsDebounced();
+            refreshLoreCount();
             return;
         }
         if (el.dataset.hf === 'celebrate') return actions.celebrate(el);
@@ -3092,6 +3174,8 @@ async function onChat() {
     if (ui.busy) { ui.runId++; ui.busy = false; runState = null; }
     ui.editing = null;
     ui.ideas = {};
+    ui.selMode = false;
+    ui.selected = {};
     if (!hasChat()) { renderStrip(); ensureTracker(true); inj.text = ''; applyInjection(); renderBody(); return; }
     const st = C();
     ensureClock();

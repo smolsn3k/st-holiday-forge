@@ -365,3 +365,14 @@ body.hf-lock { overscroll-behavior: contain; }
 .hf-clock summary > i { flex: none; }
 .hf-clock-line { flex: 1; min-width: 0; line-height: 1.35; }
 .hf-clock summary .hf-badge { flex: none; margin-left: 0; white-space: nowrap; }
+
+/* ---------- multi-select + lorebook picker ---------- */
+.hf-seltools { position: sticky; top: 0; z-index: 3; background: var(--hf-tint); }
+.hf-selrow {
+    --c: #999; display: flex; align-items: center; gap: 12px; padding: 8px 12px; margin-bottom: 8px; min-height: 58px; cursor: pointer;
+    border-radius: 14px; background: var(--hf-soft); border: 1px solid var(--hf-line); border-left: 4px solid var(--c);
+}
+.hf-selrow.on { background: color-mix(in srgb, var(--hf-accent) 20%, transparent); border-color: color-mix(in srgb, var(--hf-accent) 60%, transparent); border-left-color: var(--c); }
+.hf-selbox { flex: none; font-size: 1.35em; color: var(--hf-accent); }
+.hf-loremeta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+.hf-lorebtns { display: flex; gap: 6px; }

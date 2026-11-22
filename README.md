@@ -15,11 +15,13 @@ Works on PC and mobile. Follows your active SillyTavern theme. English and Russi
 - **Build a world from a fandom**: type a franchise (Naruto, Avatar: The Last Airbender, Harry Potter…) and the AI fills a world profile from what it knows, optionally with canon holidays. Review the result: the AI can be wrong about details.
 - **Build a world from a lorebook**: fills the world profile (world, faith, region, calendar, rules) from your lorebook entries, active ones or only the books you pick, optionally with holidays from the lore.
 - **Birthdays**: add birthdays for the bot, your persona and NPCs. Find them automatically in the bot card or the persona card, or add them by hand. The year of birth is optional; with it the age is shown and passed to the characters. Birthdays repeat every year and appear in the countdown, calendar and widget.
+- **Select and delete several holidays at once** from the Holidays tab.
 - **Manual editor**: add, edit, hide or delete holidays. Your own entries override generated ones. Pick an icon, choose "repeats every year" or one-off.
 - **In-chat widget**: sits at the top or bottom of the bot's message. Collapsed, it shows a progress ring and a live countdown to the next holiday. Expanded, it shows the description, traditions and the closest holidays.
 - **Calendar tab**: month grid with holiday icons, per-year "celebrated" marks, and a memory of which holiday happened in which year. Holidays repeat automatically next year.
 - **Chat scan**: finds mentions of your holidays across the **whole** chat (hidden messages included, nothing gets unhidden) and marks what has already passed in the story. A timeline shows past celebrations.
 - **Find new in chat**: asks the AI to read the chat (last 40 messages or the whole chat, with a progress bar and cancel) and add holidays that are not in your list yet.
+- **Lorebook control**: use the active lorebooks, only the ones you tick (with a counter plus Select all / Clear), or none at all, which also keeps World Info out of the AI requests.
 - **Lorebook scan**: pull holidays out of your lorebooks, either the active ones or only the books you pick.
 - **Character awareness**: injects a short summary of today's and upcoming holidays into the prompt, with a token budget, depth, frequency and look-ahead window.
 - **Scan date from chat**: the AI reads the recent messages, works out the story's current date and sets the in-world clock after you confirm.
@@ -136,11 +138,13 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 - **Мир по лорбуку**: заполняет профиль мира (мир, верования, регион, календарь, правила) из записей вашего лорбука, активных или только выбранных, при желании с праздниками из лора.
 - **Профили миров**: название, система верований, регион, календарь (григорианский или свои месяцы), свои правила. Для каждого чата можно выбрать свой профиль.
 - **Дни рождения**: для бота, вашей персоны и NPC. Можно найти в карточке бота или персоны либо добавить вручную. Год рождения необязателен; с ним показывается и передаётся персонажам возраст. Дни рождения повторяются каждый год и видны в отсчёте, календаре и виджете.
+- **Выбор и удаление нескольких праздников сразу** на вкладке «Праздники».
 - **Ручной редактор**: свои праздники заменяют сгенерированные; выбор значка; «повторяется каждый год» или разовый.
 - **Виджет в сообщении бота** (вверху или внизу): кольцо прогресса и живой отсчёт до ближайшего праздника; в раскрытом виде описание, традиции и ближайшие праздники.
 - **Календарь**: сетка месяца, отметки «отпразднован» по годам, память о прошлых годах. На следующий год праздники повторяются сами.
 - **Скан чата** по всему чату (скрытые сообщения тоже учитываются, показывать их не нужно) и хронология прошедших праздников.
 - **«Найти новые в чате»** через ИИ: последние 40 сообщений или весь чат, с полосой прогресса и отменой.
+- **Управление лорбуками**: активные, только отмеченные вами (со счётчиком, «Выбрать все» и «Очистить») или вообще никакие; в последнем случае World Info не попадает и в запросы к ИИ.
 - **Скан лорбука**: активные лорбуки или только выбранные вами.
 - **Осведомлённость персонажей**: краткая сводка праздников попадает в промпт (лимит токенов, глубина, частота, горизонт).
 - **Определение даты из чата**: ИИ читает последние сообщения, находит текущую дату истории и (после вашего подтверждения) ставит её в календарь расширения.
