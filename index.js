@@ -1,4 +1,4 @@
-// Holiday Forge v1.14 — SillyTavern extension
+// Holiday Forge v1.15 — SillyTavern extension
 // Generate, track and inject in-world holidays. Per-chat state, theme-adaptive, mobile-first, EN/RU.
 
 // No static imports from SillyTavern internals (paths/exports change between versions and a failed import
@@ -19,7 +19,7 @@ const ES_FALLBACK = {};
 const ES = () => getContext().extensionSettings || extMod?.extension_settings || ES_FALLBACK;
 const saveSettingsDebounced = () => { (getContext().saveSettingsDebounced || stModule?.saveSettingsDebounced)?.(); };
 
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const MODULE = 'holidayForge';
 const META = 'holidayForge';
 const PROMPT_KEY = 'HOLIDAY_FORGE';
@@ -133,6 +133,8 @@ const DEFAULTS = {
     dateFollow: 'local',
     dateAiEvery: 10,
     horaeSync: true,
+    timeTrack: 'ai',
+    timeEvery: 1,
     dateTags: 'RP_DATE, STORY_DATE',
     datePriority: 'horae',
     topLayer: false,
@@ -222,6 +224,11 @@ const L = {
         ds_horae: 'synced with Horae', ds_chat: 'from chat', ds_manual: 'manual',
         df_opt: 'Follow the date in the chat', df_off: 'off (set the date manually)', df_local: 'automatic, free (reads dates in recent messages)', df_ai: 'automatic + AI check every N messages',
         df_every: 'AI check every N messages', df_hint: 'Automatic mode reads an explicit date such as “23 December 2026, 18:30” from the first or last lines of the newest messages, or from lines that say date/time. The AI option also asks the model when no date is found (uses extra requests).',
+        tt_opt: 'Track time movement with AI (works with any extension)', tt_off: 'off', tt_ai: 'on: the AI reads new messages and moves the clock',
+        tt_every: 'Check every N messages', tt_now: 'Track time now', tt_none: 'No AI time update yet.', tt_nochange: 'no time change',
+        tt_last: (x) => `Last AI update: ${x}`, tt_done: (x) => `Time updated: ${x}`, tt_failed: 'The AI did not give a usable answer. Try again.',
+        tt_hint: 'Used only when the newest message has no explicit date and no date source (Horae, date tags) covers it. It sends one small request with the last few messages, without the chat history. Pick a fast API profile (Settings, API profile) so the chat is never delayed.',
+        ds_ai: 'tracked by AI',
         lore_none_mode: 'Do not use lorebooks (also skips World Info in the AI requests)', lore_none_note: 'No lorebook text is sent for generation, and SillyTavern’s own World Info and Author’s Note are skipped in Holiday Forge’s AI requests.',
         lore_count: (n, m) => `Selected: ${n} of ${m}`, lore_clear: 'Clear', lore_all: 'Select all',
         sel_btn: 'Select', sel_n: (n) => `${n} selected`, sel_all: 'Select all', sel_none: 'None', sel_delete: (n) => `Delete (${n})`, sel_done: 'Done',
@@ -332,6 +339,11 @@ const L = {
         ds_horae: 'синхронно с Horae', ds_chat: 'из чата', ds_manual: 'вручную',
         df_opt: 'Следовать за датой в чате', df_off: 'выкл. (дату ставлю вручную)', df_local: 'автоматически, бесплатно (читает даты в последних сообщениях)', df_ai: 'автоматически + проверка ИИ каждые N сообщений',
         df_every: 'Проверка ИИ каждые N сообщений', df_hint: 'Автоматический режим читает явную дату вроде «23 декабря 2026, 18:30» из первых или последних строк новых сообщений, либо из строк со словами «дата/время». Вариант с ИИ дополнительно спрашивает модель, если дата не найдена (это дополнительные запросы).',
+        tt_opt: 'Отслеживать ход времени через ИИ (работает с любым расширением)', tt_off: 'выкл.', tt_ai: 'вкл.: ИИ читает новые сообщения и двигает часы',
+        tt_every: 'Проверять каждые N сообщений', tt_now: 'Отследить время сейчас', tt_none: 'Обновлений времени через ИИ пока не было.', tt_nochange: 'время не изменилось',
+        tt_last: (x) => `Последнее обновление ИИ: ${x}`, tt_done: (x) => `Время обновлено: ${x}`, tt_failed: 'ИИ не дал пригодного ответа. Попробуйте ещё раз.',
+        tt_hint: 'Работает, только когда в новом сообщении нет явной даты и её не даёт источник (Horae, теги даты). Отправляет один небольшой запрос с последними сообщениями, без истории чата. Выберите быстрый API-профиль (Настройки, API-профиль), чтобы чат не тормозил.',
+        ds_ai: 'отслежено ИИ',
         lore_none_mode: 'Не использовать лорбуки (World Info тоже не попадает в запросы ИИ)', lore_none_note: 'Текст лорбуков не отправляется для генерации, а собственные World Info и Author’s Note SillyTavern пропускаются в запросах Holiday Forge.',
         lore_count: (n, m) => `Выбрано: ${n} из ${m}`, lore_clear: 'Очистить', lore_all: 'Выбрать все',
         sel_btn: 'Выбрать', sel_n: (n) => `Выбрано: ${n}`, sel_all: 'Все', sel_none: 'Снять', sel_delete: (n) => `Удалить (${n})`, sel_done: 'Готово',
@@ -543,6 +555,7 @@ function storeClock(total) {
     const day = Math.floor(total / 1440);
     const rem = total - day * 1440;
     C().clock = { ...fromDay(cal, day), h: Math.floor(rem / 60), min: rem % 60, anchor: Date.now() };
+    C().clockSet = true;
     saveChat();
 }
 
@@ -1123,7 +1136,7 @@ Return ONLY a JSON object, no markdown, no commentary:
 {"found":true,"day":<number>,"month":<number 1-${cal.length}>,"year":<number or null>,"hour":<0-23 or null>,"evidence":"short quote or reason"}
 Excerpt:
 ${text}`;
-    const o = parseJsonList(await quiet(prompt, 500))[0];
+    const o = parseJsonList(await rawQuiet(prompt, 500))[0];
     if (!o || o.found === false) return null;
     const month = monthFromAny(cal, o.month);
     if (!month || !o.day) return null;
@@ -1823,6 +1836,10 @@ function viewSettings() {
             ${num('offset', t('offset'), -3650, 3650)}
             ${num('flow', t('flow'), 0, 1440)}
             ${sel('dateFollow', t('df_opt'), [['off', t('df_off')], ['local', t('df_local')], ['ai', t('df_ai')]])}
+            ${sel('timeTrack', t('tt_opt'), [['ai', t('tt_ai')], ['off', t('tt_off')]])}
+            ${num('timeEvery', t('tt_every'), 1, 50)}
+            ${ttStatusHtml()}
+            <div class="hf-sub">${t('tt_hint')}</div>
             ${chk('horaeSync', t('hr_opt'))}
             ${sel('datePriority', t('dp_opt'), [['horae', t('dp_horae')], ['tag', t('dp_tag')]])}
             <label>${t('tg_names')}<input class="text_pole" data-set="dateTags" value="${esc(s.dateTags)}"></label>
@@ -2229,6 +2246,7 @@ const actions = {
         else window.toastr?.warning(t('hr_bad'));
         renderBody();
     },
+    'track-now': () => aiTrackTime(true, true),
     'bd-find': (el) => runBusy(() => findBirthday(el.dataset.role), 't_nothing'),
     'bd-add': (el) => { ui.bdEditing = 'new'; ui.bdDraft = { role: el.dataset.role, person: defaultPerson(el.dataset.role), auto: true }; renderBody(); },
     'bd-cancel': () => { ui.bdEditing = null; ui.bdDraft = null; renderBody(); },
@@ -2743,6 +2761,7 @@ async function collectDiag(withTest) {
         };
     }));
     if (withTest) add('openTest', await testOpen());
+    add('timeTrack', safe(() => ({ setting: S().timeTrack, every: S().timeEvery, last: lastTrack.at ? lastTrack.text : null, clockSet: !!C()?.clockSet, source: ui.dateSource })));
     add('tags', safe(() => { const f = latestTag(); return { setting: S().dateTags, found: f ? { raw: f.hit.raw, parsed: { y: f.hit.y, m: f.hit.m, d: f.hit.d, h: f.hit.h, min: f.hit.min }, messagesBack: f.ago } : null, source: ui.dateSource }; }));
     add('horae', safe(() => {
         const H = globalThis.Horae;
@@ -2879,7 +2898,7 @@ function followDate(initial = false) {
     if (!s.enabled || s.dateFollow === 'off' || !hasChat() || !C()) return null;
     const np = nowParts();
     const msgs = chatList(getContext().chat);
-    const lookback = initial ? 8 : 2;
+    const lookback = initial ? 8 : 1; // only the newest message counts as a live date stamp
     for (let i = msgs.length - 1; i >= Math.max(0, msgs.length - lookback); i--) {
         const hit = localDate(msgs[i].mes, np.cal);
         if (!hit) continue;
@@ -3158,17 +3177,160 @@ async function aiFollowDate() {
     refreshAll();
 }
 
+const TRACK_SYS = 'You track in-story time for a roleplay. Answer with one JSON object only.';
+
+/** A small request that does NOT carry the chat history (cheap and fast). Uses the chosen API profile if there is one,
+ *  otherwise SillyTavern's raw generation, and only as a last resort the normal quiet prompt. */
+async function rawQuiet(prompt, maxTokens = 200) {
+    const s = S();
+    const ctx = getContext();
+    const svc = ctx.ConnectionManagerRequestService;
+    const profId = s.apiProfile && profiles().some((x) => x.id === s.apiProfile) ? s.apiProfile : '';
+    if (profId && svc) {
+        const res = await svc.sendRequest(profId, [{ role: 'system', content: TRACK_SYS }, { role: 'user', content: prompt }], maxTokens, { stream: false, extractData: true, includePreset: true, includeInstruct: true }, {});
+        return String(res?.content ?? res ?? '');
+    }
+    if (typeof ctx.generateRaw === 'function') {
+        try {
+            const o = await ctx.generateRaw({ prompt, systemPrompt: TRACK_SYS, responseLength: maxTokens });
+            if (o && typeof o === 'string') return o;
+        } catch (e) { dlog('generateRaw (object form) failed: ' + (e?.message || e)); }
+        try {
+            const o = await ctx.generateRaw(prompt, null, false, false, TRACK_SYS, maxTokens);
+            if (o && typeof o === 'string') return o;
+        } catch (e) { dlog('generateRaw (legacy form) failed: ' + (e?.message || e)); }
+    }
+    return quiet(prompt, maxTokens);
+}
+
+/** True when something other than the AI tracker covers the newest message: an explicit date in it, or a working Horae. */
+function externalSourceLive() {
+    const s = S();
+    const cal = nowParts().cal;
+    const last = chatList(getContext().chat).slice(-1)[0];
+    if (last) {
+        if (s.horaeSync && tagDate(last.mes, cal)) return true;
+        if (localDate(last.mes, cal)) return true;
+    }
+    if (s.horaeSync) {
+        const r = readHorae();
+        if (r && (r.date || r.abs) && parseHoraeDate(r, cal)) return true;
+    }
+    return false;
+}
+
+let timeCounter = 0, timePending = false;
+const lastTrack = { at: 0, text: '' };
+
+/** Ask for the in-story time movement caused by the newest message(s) and work out the new clock value in code. */
+async function trackTime(catchUp = false) {
+    const p = P();
+    const cal = calendar(p);
+    const np = nowParts();
+    const s = S();
+    const list = chatList(getContext().chat);
+    if (!list.length) return null;
+    const fresh = catchUp ? Math.min(6, list.length) : Math.max(1, s.timeEvery);
+    const recent = list.slice(-(fresh + 2));
+    const cut = (m, n) => String(m.mes).replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+    const text = recent.map((m, i) => { const isNew = i >= recent.length - fresh; return `[${isNew ? 'NEW' : 'earlier'}] ${m.name}: ${cut(m, isNew ? 1500 : 500)}`; }).join('\n');
+    const label = `${fmtDate(cal, np.y, np.m, np.d)}, ${pad2(np.h)}:${pad2(np.min)}`;
+    const plural = fresh > 1 ? 's' : '';
+    const prompt = `[OOC SYSTEM TASK — pause the roleplay. Do not write story text.]
+You track the passage of IN-STORY time.
+The story clock showed ${label} before the NEW message${plural}.${catchUp ? ' It may be out of date: use any dates, weekdays, holidays, seasons or time words in the text to correct it.' : ''}
+Calendar: ${p.calendarType === 'custom' ? 'custom' : 'Gregorian'}; months numbered ${cal.map((m, i) => `${i + 1}=${m.name}(${m.days}d)`).join(', ')}
+Messages (judge the NEW ones; the earlier ones are only context):
+${text}
+
+Work out the in-story date and time at the END of the NEW message${plural}:
+- If the text states a date or a clock time, report it.
+- Otherwise estimate the time that passed because of what happens in the NEW message${plural}: a short exchange 1-10 minutes, a meal 30-60, a night's sleep until morning, travel by distance, "next day / a week later / three months later" exactly as stated. Do not leave minutes at 0 unless it is the very same moment.
+Return ONLY one JSON object, no markdown:
+{"date":<explicit date such as "16 November 2026", or null>,"time":<"HH:MM" if stated or clearly implied, else null>,"days":<whole days passed, 0 if none>,"minutes":<minutes passed, 0 if none>,"reason":"short phrase"}`;
+    const o = parseJsonList(await rawQuiet(prompt, 220))[0];
+    if (!o || typeof o !== 'object') return null;
+    const base = clockMinutes(false);
+    const tm = o.time ? timeOf(String(o.time)) : null;
+    let total = null;
+    if (o.date && String(o.date).toLowerCase() !== 'null') {
+        const hit = parseHoraeDate({ date: String(o.date), time: tm ? String(o.time) : '', abs: '' }, cal);
+        if (hit) {
+            const h = hit.h ?? tm?.h ?? np.h;
+            const min = hit.h !== undefined ? hit.min : tm ? tm.min : np.min;
+            total = toDay(cal, hit.y ?? np.y, hit.m, hit.d) * 1440 + h * 60 + min - Math.round(s.offset) * 1440;
+        }
+    }
+    if (total === null) {
+        let days = Math.max(0, Math.round(+o.days) || 0);
+        let mins = Math.max(0, Math.round(+o.minutes) || 0);
+        if (days > 3650) days = 0;
+        if (mins > 1440 * 30) mins = 0;
+        if (tm) { // a clock time was given: land on it (the next day if it is earlier than now and no days were given)
+            let cand = Math.floor((base + days * 1440) / 1440) * 1440 + tm.h * 60 + tm.min;
+            if (days === 0 && cand < base) cand = base - cand <= 30 ? base : cand + 1440;
+            total = cand;
+        } else total = base + days * 1440 + mins;
+    }
+    const nd = Math.floor(total / 1440);
+    const rem = total - nd * 1440;
+    const d = fromDay(cal, nd);
+    return { total, same: total === base, reason: String(o.reason || '').slice(0, 80), label: `${fmtDate(cal, d.y, d.m, d.d)}, ${pad2(Math.floor(rem / 60))}:${pad2(rem % 60)}` };
+}
+
+async function aiTrackTime(catchUp = false, announce = false) {
+    const s = S();
+    if (!s.enabled || !hasChat() || !C()) return;
+    if (aiDateBusy || ui.busy) {
+        if (announce) window.toastr?.info(t('busy'));
+        else timePending = true; // run once more when the current request is done
+        return;
+    }
+    aiDateBusy = true;
+    inj.text = ''; // the fallback (quiet prompt) would otherwise see our own, possibly outdated, date
+    applyInjection();
+    let res = null;
+    try { res = await withTimeout(trackTime(catchUp), 90000); } catch (e) { dlog('time tracking failed: ' + (e?.message || e)); }
+    aiDateBusy = false;
+    if (res) {
+        const text = res.same ? t('tt_nochange') : `${res.label}${res.reason ? ` (${res.reason})` : ''}`;
+        lastTrack.at = Date.now();
+        lastTrack.text = text;
+        if (!res.same) {
+            ui.dateSource = 'ai';
+            storeClock(res.total);
+            dlog(`time tracked: ${res.label} (${res.reason})`);
+        }
+    }
+    refreshAll();
+    if (res && !res.same) toastToday();
+    if (announce) window.toastr?.[res ? 'success' : 'warning'](res ? t('tt_done', lastTrack.text) : t('tt_failed'));
+    if (timePending) { timePending = false; aiTrackTime(); }
+}
+
+function ttStatusHtml() {
+    return `<div class="hf-sub">${lastTrack.at ? esc(t('tt_last', lastTrack.text)) : t('tt_none')}</div>
+        <div class="hf-actions"><button class="hf-btn small" data-hf="track-now"><i class="fa-solid fa-hourglass-half"></i> ${t('tt_now')}</button></div>`;
+}
+
 function scheduleFollow(fromAi) {
     clearTimeout(followTimer);
     followTimer = setTimeout(() => {
         const s = S();
         let r = null;
         try { r = followAny(false); } catch (e) { dlog('follow: ' + (e?.message || e)); }
-        if (r === 'applied') { refreshAll(); toastToday(); return; }
-        refreshInjection();
-        if (!r && fromAi && s.enabled && s.dateFollow === 'ai' && ++aiCounter >= Math.max(2, s.dateAiEvery)) { aiCounter = 0; aiFollowDate(); }
+        if (r === 'applied') { refreshAll(); toastToday(); } else refreshInjection();
+        if (!fromAi || !s.enabled || !hasChat() || !C()) return;
+        let live = false;
+        try { live = externalSourceLive(); } catch (e) { dlog('source check: ' + (e?.message || e)); }
+        if (live) return; // an explicit date source covers this message
+        if (s.timeTrack === 'ai') {
+            if (++timeCounter >= Math.max(1, s.timeEvery)) { timeCounter = 0; aiTrackTime(); }
+        } else if (s.dateFollow === 'ai' && ++aiCounter >= Math.max(2, s.dateAiEvery)) { aiCounter = 0; aiFollowDate(); }
     }, 800);
 }
+
+const caughtUp = new Set();
 
 async function onChat() {
     if (ui.busy) { ui.runId++; ui.busy = false; runState = null; }
@@ -3181,6 +3343,13 @@ async function onChat() {
     ensureClock();
     try { followAny(true); } catch (e) { dlog('follow: ' + (e?.message || e)); }
     scheduleHoraeRecheck(2500); // Horae builds its own state on chat load too, usually a moment after us
+    const chatKey = String(chatIdNow());
+    if (S().timeTrack === 'ai' && !caughtUp.has(chatKey)) {
+        caughtUp.add(chatKey);
+        setTimeout(() => {
+            try { if (S().enabled && S().timeTrack === 'ai' && hasChat() && C() && !externalSourceLive()) aiTrackTime(true); } catch (e) { dlog('catch-up: ' + (e?.message || e)); }
+        }, 3500);
+    }
     scanChat();
     refreshAll();
     toastToday();

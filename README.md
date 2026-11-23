@@ -28,6 +28,7 @@ Works on PC and mobile. Follows your active SillyTavern theme. English and Russi
 - **Follows the date in your chat**: reads explicit dates (e.g. “23 December 2026, 18:30”) from new messages and moves the in-world clock by itself, free and instant. Optional AI check every N messages.
 - **Horae integration**: if the [Horae](https://github.com/SenriYuki/SillyTavern-Horae) memory extension is active, Holiday Forge follows Horae's story date and time automatically (Horae 1.14+, via its public `window.Horae` API). Without Horae it reads dates from the chat itself.
 - **Date tags**: reads hidden date tags such as `<!-- [RP_DATE:16 November 2026 10:05] -->` straight from the messages (tag names are configurable). They have priority over everything else, so the in-world date follows the story even if Horae lags behind.
+- **Built-in time tracking (any extension)**: when the newest message has no explicit date and no date source (Horae, date tags) covers it, a small AI request without the chat history works out how much in-story time passed ("next morning", "a week later", a 20-minute talk) and moves the clock. Works with any other time/memory extension, or none.
 - **Per-chat state**: holidays, in-world date and "celebrated" memory belong to the chat, so different RPs never clash.
 - **API profile chooser**: run generation through any Connection Manager profile.
 - **Import / export**: holidays, one world, one world with its holidays, or all worlds as JSON files. Paste-JSON import for phones.
@@ -151,6 +152,7 @@ Open **Extensions → Manage extensions** and press the update button next to Ho
 - **Следует за датой в чате**: читает явные даты (например, «23 декабря 2026, 18:30») из новых сообщений и сам двигает календарь, бесплатно и мгновенно. По желанию: проверка ИИ каждые N сообщений.
 - **Интеграция с Horae**: если активно расширение [Horae](https://github.com/SenriYuki/SillyTavern-Horae), Holiday Forge автоматически следует за его датой и временем истории (Horae 1.14+, через публичный `window.Horae`). Без Horae дата читается из самого чата.
 - **Теги даты**: читает скрытые теги вида `<!-- [RP_DATE:16 November 2026 10:05] -->` прямо из сообщений (названия тегов настраиваются). У них высший приоритет, поэтому дата в мире следует за историей, даже если Horae отстаёт.
+- **Собственный учёт времени (с любым расширением)**: если в новом сообщении нет явной даты и её не даёт источник (Horae, теги даты), небольшой запрос к ИИ без истории чата определяет, сколько времени прошло в истории («наутро», «через неделю», 20 минут разговора), и двигает часы. Работает с любым другим расширением времени/памяти или без него.
 - **Состояние на чат**: праздники, дата в мире и память не пересекаются между разными чатами.
 - **Выбор API-профиля** (Connection Manager) для генерации.
 - **Импорт / экспорт** праздников и миров в JSON, в том числе вставкой текста.
